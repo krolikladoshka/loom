@@ -1,0 +1,10 @@
+[package]
+name = "loom"
+version = "0.1.0"
+edition = "2024"
+[features]
+enable-asserts=[]
+
+[dependencies]
+maplit = "1.0.2"
+rstest = "0.25.0"
