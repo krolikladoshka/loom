@@ -1,0 +1,11 @@
+struct Test {}
+
+impl
+Test
+{
+    fn function() {}
+    
+    fn function2(a: i32) -> i64 {
+        return a as i64;
+    }
+}

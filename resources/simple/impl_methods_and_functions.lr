@@ -1,0 +1,27 @@
+struct Test {}
+
+impl
+Test
+{
+    fn function() {}
+    fn function2(a: i32) -> i64 {
+        return a as i64;
+    }
+    
+    fn method_const(*self) {}
+    fn method_mut(*mut self) {
+    
+    }
+    
+    fn method_const_args(*self, a: i32) -> i64 {
+        *self;
+        
+        return a as i64;
+    }
+    
+    fn method_const_args(*mut self, a: i32, b: *i32) -> i64 {
+        *self;
+        
+        return (a as i64) * (*b as i64);
+    }
+}

@@ -1,0 +1,11 @@
+fn test() -> i32 {
+}
+
+struct TestA {}
+
+fn test2()
+    ->
+        TestA 
+{
+
+}
