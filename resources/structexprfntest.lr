@@ -1,0 +1,60 @@
+//noinspection RsDetachedFile
+
+struct Test {
+    array: *mut i32,
+    size: usize,
+    capacity: usize,
+    current: usize,
+}
+
+/*
+enum<Q> T {
+    A,
+    B(Test),
+    C(i32),
+    Some(Q)
+}
+*/
+
+impl Test {
+    fn new() -> Test {
+        Test {
+            array:
+        }
+    }
+
+    fn destroy(*self) {
+        free(self->array, self.capacity);
+    }
+
+}
+
+//enum struct {
+//}
+
+fn func(mut test: mut *const i32, arg2: f64) -> Option {
+    return B(*test as f64 * arg2);
+}
+
+//enum TestResult {
+//    None,
+//    Ok(Test),
+//}
+
+fn func2(test_arg: *const Test) -> TestResult {
+}
+
+fn main() {
+    let mut q = Test::new();
+    {
+        defer block q.destroy();
+    };
+    let mut group = WaitGroup::new(2);
+    branch func();
+    branch func2();
+    let q = Test::new();
+    let mut ptr = &q;
+    q->func1();
+    *q.func1();
+    group.wait();
+}

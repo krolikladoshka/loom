@@ -1,0 +1,8 @@
+struct TypeA {
+    type_a_field_1: i32
+}
+
+struct TestCompound {
+    type_a: TypeA,
+    simple_i32: i32
+}

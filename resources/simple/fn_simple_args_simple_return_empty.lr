@@ -1,0 +1,21 @@
+fn test(a_i32: i32, b_i64: i64) -> i32 {
+}
+
+struct TestA {}
+
+fn test2(
+    a1: i8,
+    a2: i16,
+    a3: i32,
+    a4: i64,
+    a5: u8,
+    mut a6: u16,
+    mut a7: u32,
+    mut a8: u64,
+    mut a9: TestA
+)
+    ->
+        TestA 
+{
+
+}

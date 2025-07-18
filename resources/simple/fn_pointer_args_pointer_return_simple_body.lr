@@ -1,0 +1,22 @@
+struct TestA {
+    a:
+}
+
+fn test2(
+    a1: *i8,
+    a2: *mut i16,
+    a3: *const i32,
+    a4: *mut *const i64,
+    mut a5: *u8,
+    mut a6: *mut u16,
+    mut a7: *const u32,
+    mut a8: *mut * const u64,
+    a9: *mut TestA
+)
+    ->
+        TestA 
+{
+    (*a1 + *a1);
+    *a2 = 1u16;
+    return TestA {};
+}

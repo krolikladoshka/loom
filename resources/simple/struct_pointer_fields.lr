@@ -1,0 +1,11 @@
+struct TestStructA {
+    test_field_i8: i8
+}
+
+struct TestStructWithSimpleFields {
+    test_field_i8: *i8,
+    test_field_i16: *mut i16,
+    test_field_i32: *const i32,
+    test_field_i64: *mut *const *mut i64, // int ***a = &(&(&a));
+    test_field_test_struct_a: *mut TestStructA,
+}

@@ -1,0 +1,12 @@
+struct TestStructWithSimpleFields {
+    test_field_i8: i8,
+    test_field_i16: i16,
+    test_field_i32: i32,
+    test_field_i64: i64,
+    test_field_u8: u8,
+    test_field_u16: u16,
+    test_field_u32: u32,
+    test_field_u64: u64,
+    test_field_f32: f32,
+    test_field_f64: f64
+}
