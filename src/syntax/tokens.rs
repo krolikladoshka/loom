@@ -142,6 +142,45 @@ pub enum TokenType {
     AsRaw, // as row <type> // reinterpret_cast
 }
 
+impl TokenType {
+    pub const UNARY_OPERATORS: &'static [Self] = &[
+        Self::Star,
+        Self::Minus,
+        Self::LogicalNot,
+        Self::BinaryInvert,
+    ];
+    
+    pub const MULTIPLICATIVE_OPERATORS: &'static [Self] = &[
+        Self::Star,
+        Self::Slash,
+        Self::Percent,
+    ];
+    
+    pub const ADDITIVE_OPERATORS: &'static [Self] = &[
+        Self::Plus,
+        Self::Minus,
+    ];
+    
+    pub const BINARY_SHIFT_OPERATORS: &'static [Self] = &[
+        Self::BinaryShiftLeft,
+        Self::BinaryShiftRight,
+    ];
+    
+    pub const COMPARISON_OPERATORS: &'static [Self] = &[
+        Self::Less,
+        Self::LessEqual,
+        Self::Greater,
+        Self::GreaterEqual,
+        Self::EqualsEquals,
+        Self::NotEquals,
+    ];
+    
+    pub const RANGE_OPERATORS: &'static [Self] = &[
+        Self::RangeExclusive,
+        Self::RangeInclusive,
+    ];
+}
+
 pub static SIMPLE_TOKENS: LazyLock<HashMap<char, TokenType>> = LazyLock::new(
     || {
         hashmap! {

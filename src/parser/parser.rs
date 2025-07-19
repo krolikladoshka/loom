@@ -2,7 +2,8 @@ use std::env;
 use std::fmt::Display;
 use std::fs::read_to_string;
 use std::path::Path;
-use crate::syntax::ast::{Expression, Function, ImplFunction, Method, Statement, TypeAnnotation, TypedDeclaration};
+use std::str::FromStr;
+use crate::syntax::ast::{Literal, Expression, Function, ImplFunction, Method, Statement, TypeAnnotation, TypeKind, TypedDeclaration, Type, PointerAnnotation, Identifier};
 use crate::syntax::lexer::{Lexer, Token};
 use crate::syntax::tokens::TokenType;
 
@@ -87,6 +88,21 @@ impl Display for InitializerRequiredError {
 }
 
 #[derive(Debug, Clone)]
+pub struct LiteralParseError {
+    pub token: Token,
+    pub to: &'static str
+}
+
+impl Display for LiteralParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f, "couldn't parse literal from token {} into {}",
+            self.token, self.to
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ParserError {
     EmptyStream,
     UnrecognizedToken(Token),
@@ -96,6 +112,8 @@ pub enum ParserError {
     UnexpectedStatement(Token),
     TypeAnnotationRequired(TypeAnnotationRequiredError),
     InitializerRequired(InitializerRequiredError),
+    LiteralParseError(LiteralParseError),
+    UnexpectedPrimaryExpression(Token),
     ParseError(ParseError),
     CompoundError(Vec<ParserError>)
 }
@@ -117,6 +135,10 @@ impl Display for ParserError {
                 write!(f, "{}", t),
             Self::InitializerRequired(t) =>
                 write!(f, "{}", t),
+            Self::LiteralParseError(err) =>
+                write!(f, "{}", err),
+            Self::UnexpectedPrimaryExpression(t) =>
+                write!(f, "unexpected primary expression token {}", t),
             Self::ParseError(t) => write!(f, "Uncategorized error: {}", t),
             Self::CompoundError(errors) => {
                 let mut messages = vec![];
@@ -150,6 +172,13 @@ impl ParserError {
 
     pub fn initializer_required(identifier: Token, message: &'static str) -> Self {
         Self::InitializerRequired(InitializerRequiredError { identifier, message })
+    }
+    
+    pub fn literal_parse_error(token: Token, to: &'static str) -> Self {
+        Self::LiteralParseError(LiteralParseError {
+            token,
+            to,
+        })
     }
 }
 
@@ -260,13 +289,54 @@ impl Parser {
         Ok(token)
     }
 
-    fn match_tokens(&mut self, token_types: &[TokenType]) -> bool {
-        let current_token = match self.peek() {
-            Some(token) => token.token_type,
-            None => return false,
+    fn require_type_identifier(&mut self) -> ParserResult<Token> {
+        const TOKEN_TYPES:  &'static [TokenType] = &[
+            TokenType::Identifier,
+            TokenType::I8, TokenType::I16,
+            TokenType::I32, TokenType::I64,
+            TokenType::U8, TokenType::U16,
+            TokenType::U32, TokenType::U64,
+            TokenType::F32, TokenType::F64,
+            TokenType::Bool,
+        ];
+
+        let Some(token) = self.peek().cloned() else {
+            return Err(self.wrap_error(ParserError::unexpected_eof(
+                TokenType::Identifier,
+                "expected type identifier",
+            )));
         };
 
-        token_types.contains(&current_token)
+        if TOKEN_TYPES.contains(&token.token_type) {
+            self.advance();
+            Ok(token.clone())
+        } else {
+            Err(self.wrap_error(ParserError::unexpected_token(
+                token.clone(),
+                TokenType::Identifier,
+                "expected type identifier",
+            )))
+        }
+    }
+
+
+    fn match_tokens(
+        &mut self, token_types: &[TokenType], msg: &'static str
+    ) -> ParserResult<Option<Token>> {
+        self.advance_skipping_comments();
+
+        let Some(token) = self.peek().cloned() else {
+            return Err(self.wrap_error(ParserError::unexpected_eof(
+                token_types[0].clone(),
+                msg
+            )));
+        };
+        
+        if token_types.contains(&token.token_type) {
+            Ok(Some(token))
+        } else {
+            Ok(None)
+        }
     }
 
     fn parse_panic(&mut self) -> Vec<Statement> {
@@ -340,6 +410,7 @@ impl Parser {
             TokenType::Semicolon => self.empty_statement(),
             TokenType::Use => self.parse_top_level_use(),
             TokenType::Pub => self.parse_top_level_pub(),
+            TokenType::Impl => self.impl_statement(),
             _ => match self.structs_functions_and_variable_declarations() {
                 Ok(statement) => Ok(statement),
                 Err(ParserError::UnexpectedStatement(token)) => Err(
@@ -442,32 +513,116 @@ impl Parser {
         }
     }
 
+    fn match_current(
+        &mut self, expected: TokenType, msg: &'static str
+    )-> ParserResult<Option<Token>> {
+        self.advance_skipping_comments();
+
+        let Some(token) = self.peek().cloned() else {
+            return Err(self.wrap_error(ParserError::unexpected_eof(
+                expected,
+                msg
+            )));
+        };
+
+        if token.token_type == expected {
+            Ok(Some(token))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn simple_type(&mut self) -> ParserResult<Type> {
+        self.advance_skipping_comments();
+
+        Ok(Type {
+            name: self.require_type_identifier()?
+        })
+    }
+
+    fn pointer_type(&mut self) -> ParserResult<PointerAnnotation> {
+        self.advance_skipping_comments();
+        self.require(TokenType::Star, "expected '*'")?;
+        let mut points_to_mut = false;
+
+        if self.match_current(
+            TokenType::Mut, "expected mut modifier"
+        )?.is_some() {
+            self.advance();
+            self.advance_skipping_comments();
+
+            points_to_mut = true;
+        } else if self.match_current(
+            TokenType::Const, "expected const modifier"
+        )?.is_some() {
+            self.advance();
+            self.advance_skipping_comments();
+
+            points_to_mut = false
+        }
+
+        if let Some(_) = self.match_current(
+            TokenType::Star, "Expected '*' or type identifier"
+        )? {
+            let sub_ptr = self.pointer_type()?;
+
+            Ok(PointerAnnotation {
+                inner_type: Box::new(TypeKind::Pointer(sub_ptr)),
+                points_to_mut
+            })
+        } else {
+            let simple_type = self.simple_type()?;
+
+
+            Ok(PointerAnnotation {
+                inner_type: Box::new(TypeKind::Simple(simple_type)),
+                points_to_mut
+            })
+        }
+    }
+
     fn type_annotation(&mut self, no_mut: bool) -> ParserResult<TypeAnnotation> {
         let mut is_mut = false;
         if !no_mut {
-            let Some(token) = self.peek().cloned() else {
+            let Ok(token) = self.peek_protected() else {
                 return Err(self.wrap_error(ParserError::unexpected_eof(
-                    TokenType::Identifier,
-                    "expected type annotation"
+                    TokenType::Mut, "expected mut modifier"
                 )));
             };
 
             if token.token_type == TokenType::Mut {
                 self.advance();
+                self.advance_skipping_comments();
 
                 is_mut = true;
             };
         }
 
-        let type_identifier = self.require(
-            TokenType::Identifier,
-            "expected type identifier"
-        )?;
+        let Some(token) = self.peek().cloned() else {
+            return Err(self.wrap_error(ParserError::unexpected_eof(
+                TokenType::Star,
+                "expected '*' or type identifier"
+            )));
+        };
 
-        Ok(TypeAnnotation {
-            name: type_identifier,
-            is_mut,
-        })
+        if token.token_type == TokenType::Star {
+            // self.advance();
+            // self.advance_skipping_comments();
+
+            let pointer_type = self.pointer_type()?;
+
+            Ok(TypeAnnotation {
+                kind: TypeKind::Pointer(pointer_type),
+                is_mut,
+            })
+        } else {
+            let simple_type = self.simple_type()?;
+
+            Ok(TypeAnnotation {
+                kind: TypeKind::Simple(simple_type),
+                is_mut,
+            })
+        }
     }
 
     fn common_variable_declaration<T, Constructor>(
@@ -635,10 +790,6 @@ impl Parser {
             TokenType::LeftParenthesis,
             "expected '(' after function name"
         )?;
-        self.require(
-            TokenType::LeftParenthesis,
-            "expected '(' after function name"
-        )?;
 
         Ok((token, function_name))
     }
@@ -670,7 +821,7 @@ impl Parser {
         })
     }
 
-    fn function_end(&mut self) -> ParserResult<(Option<Token>, Vec<Statement>)>
+    fn function_end(&mut self) -> ParserResult<(Option<TypeAnnotation>, Vec<Statement>)>
     {
         self.require(
             TokenType::RightParenthesis,
@@ -681,27 +832,15 @@ impl Parser {
             Some(token) => if token.token_type == TokenType::Arrow {
                 self.advance();
 
-                Some(self.require(
-                    TokenType::Identifier,
-                    "expected return type identifier after '->'"
-                )?)
+                let type_annotation = self.type_annotation(true)?;
+                Some(type_annotation)
             } else {
                 None
             },
             None => None
         };
 
-        self.require(
-            TokenType::LeftBrace,
-            "expected '{' after function arguments list"
-        )?;
-
         let body = self.parse_block_of_statements()?;
-
-        self.require(
-            TokenType::RightBrace,
-            "expected '}' after function body"
-        )?;
 
         Ok((type_identifier, body))
     }
@@ -827,6 +966,7 @@ impl Parser {
             if token.token_type != TokenType::Comma {
                 break;
             }
+            self.advance();
         }
 
         let (type_identifier, body) = self.function_end()?;
@@ -1202,16 +1342,173 @@ impl Parser {
         })
     }
 
+    fn grouping(&mut self) -> ParserResult<Expression> {
+        let token = self.require(
+            TokenType::LeftParenthesis,
+            "expected '(' in grouping expression"
+        )?;
+        let expression = self.parse_expression()?;
+        self.require(
+            TokenType::RightParenthesis,
+            "expected ')' in grouping expression"
+        )?;
 
+        Ok(Expression::Grouping {
+            token,
+            expression: Box::new(expression),
+        })
+    }
+
+    fn identifier(&mut self) -> ParserResult<Expression> {
+        let name = self.require(
+            TokenType::Identifier, "primary identifier"
+        )?;
+
+        Ok(Expression::Identifier {
+            name
+        })
+    }
+
+    fn self_expression(&mut self) -> ParserResult<Expression> {
+        let self_token = self.require(
+            TokenType::SelfToken, "self primarity identifier"
+        )?;
+
+        Ok(Expression::SelfExpression {
+            token: self_token,
+        })
+    }
+
+    fn function_expression(&mut self) -> ParserResult<Expression> {
+        let (token, function_name) = self.function_start()?;
+
+        let mut arguments = vec![];
+        loop {
+            let token = match self.peek().cloned() {
+                Some(token) => token,
+                None => return Err(self.wrap_error(ParserError::unexpected_eof(
+                    TokenType::Identifier,
+                    "Expected argument or closing parenthesis"
+                )))
+            };
+
+            if token.token_type == TokenType::RightParenthesis {
+                break;
+            }
+
+            let typed_declaration = self.function_argument(token)?;
+            arguments.push(typed_declaration);
+
+            let token = match self.peek() {
+                Some(token) => token,
+                None => return Err(self.wrap_error(ParserError::unexpected_eof(
+                    TokenType::Comma,
+                    "expected comma or closing parenthesis"
+                )))
+            };
+
+            if token.token_type != TokenType::Comma {
+                break;
+            }
+            self.advance();
+        }
+
+        let (type_identifier, body) = self.function_end()?;
+
+        let function = Function {
+            name: function_name,
+            arguments,
+            return_type: type_identifier,
+            body
+        };
+
+        Ok(Expression::FnExpression {
+            token,
+            function
+        })
+    }
+
+    fn if_else_expression(&mut self) -> ParserResult<Expression> {
+        todo!("if else expression is not implemented")
+    }
+
+    fn token_as_literal<T>(
+        &mut self, token: &Token
+    ) -> ParserResult<T>
+    where
+        T: FromStr,
+    {
+        T::from_str(token.literal.as_str()).or_else(|err|
+            Err(self.wrap_error(ParserError::literal_parse_error(
+                token.clone(),
+                stringify!(T),
+            )))
+        )
+    }
+
+    fn literal(&mut self) -> ParserResult<Expression> {
+        self.advance_skipping_comments();
+
+        let token = match self.peek().cloned() {
+            Some(token) => token,
+            _ => return Err(self.wrap_error(ParserError::unexpected_eof(
+                TokenType::Identifier,
+                "expected primary token"
+            )))
+        };
+
+        let literal = match token.token_type {
+            TokenType::U8Literal => Literal::U8 {
+                token: token.clone(),
+                value: self.token_as_literal(&token)?,
+            },
+            TokenType::U16Literal => Literal::U16 {
+                token: token.clone(),
+                value: self.token_as_literal(&token)?,
+            },
+            TokenType::U32Literal => Literal::U32 {
+                token: token.clone(),
+                value: self.token_as_literal(&token)?,
+            },
+            TokenType::U64Literal => Literal::U64 {
+                token: token.clone(),
+                value: self.token_as_literal(&token)?,
+            },
+            // },TokenType::U16Literal |
+            // TokenType::U32Literal | TokenType::U64Literal |
+            // TokenType::I8Literal | TokenType::I16Literal |
+            // TokenType::I32Literal | TokenType::I64Literal |
+            // TokenType::F32Literal | TokenType::F64Literal |
+            // TokenType::BoolLiteral | TokenType::StringLiteral |
+            // TokenType::CharLiteral | TokenType::MultilineStringLiteral |
+            // TokenType::Vector2Literal | TokenType::Vector3Literal |
+            // TokenType::Vector4Literal | TokenType::Matrix2Literal |
+            // TokenType::Matrix3Literal | TokenType::Matrix4Literal => {},
+            _ => return Err(self.wrap_error(ParserError::UnexpectedPrimaryExpression(
+                token
+            )))
+        };
+
+        Ok(Expression::Literal(literal))
+    }
     fn primary(&mut self) -> ParserResult<Expression> {
+        self.advance_skipping_comments();
+
         let current_token = match self.peek() {
             Some(token) => token,
-            _ => panic!("Expected primary token")
+            _ => return Err(self.wrap_error(ParserError::unexpected_eof(
+                TokenType::Identifier,
+                "expected primary token"
+            )))
         };
 
         match current_token.token_type {
-            TokenType::EOF => panic!("Unexpected end of file"),
-            _ => todo!("Primary parsing")
+            TokenType::Identifier => self.identifier(),
+            TokenType::RightParenthesis => self.grouping(),
+            TokenType::If => self.if_else_expression(),
+            TokenType::Fn => self.function_expression(),
+            TokenType::SelfToken => self.self_expression(),
+            _ => self.literal()
         }
     }
 
@@ -1228,7 +1525,20 @@ impl Parser {
     }
 
     fn unary(&mut self) -> ParserResult<Expression> {
-        self.array_slice()
+        let Some(token) = self.match_tokens(
+            TokenType::UNARY_OPERATORS, "unary operator"
+        )? else {
+            return self.array_slice();
+        };
+        
+        // todo: maybe error: parse array slice
+        let expression = self.parse_expression()?;
+        
+        Ok(Expression::Unary {
+            token: token.clone(),
+            operator: token,
+            expression: Box::new(expression)
+        })
     }
 
     fn postfix(&mut self) -> ParserResult<Expression> {
@@ -1243,8 +1553,8 @@ impl Parser {
     {
         let mut expr = parse_operand(self)?;
 
-        while self.match_tokens(operators) {
-            let operator = self.peek_protected()?.clone();
+        while let Some(operator) = self.match_tokens(operators, "binary expression")?
+        {
             let right = parse_operand(self)?;
             expr = Expression::Binary {
                 left: Box::new(expr),
@@ -1259,21 +1569,21 @@ impl Parser {
     fn multiplicative(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::postfix,
-            &[TokenType::Star, TokenType::Slash, TokenType::Percent]
+            TokenType::MULTIPLICATIVE_OPERATORS,
         )
     }
 
     fn additive(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::multiplicative,
-            &[TokenType::Plus, TokenType::Minus]
+            TokenType::ADDITIVE_OPERATORS,
         )
     }
 
     fn binary_shifts(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::additive,
-            &[TokenType::BinaryShiftLeft, TokenType::BinaryShiftRight]
+            TokenType::BINARY_SHIFT_OPERATORS,
         )
     }
 
@@ -1301,11 +1611,7 @@ impl Parser {
     fn comparisons(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::bitwise_or,
-            &[
-                TokenType::Less, TokenType::LessEqual,
-                TokenType::Greater, TokenType::GreaterEqual,
-                TokenType::EqualsEquals, TokenType::NotEquals,
-            ]
+            TokenType::COMPARISON_OPERATORS,
         )
     }
 
@@ -1326,7 +1632,7 @@ impl Parser {
     fn ranges(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::logical_or,
-            &[TokenType::RangeInclusive, TokenType::RangeExclusive]
+            TokenType::RANGE_OPERATORS,
         )
     }
 
@@ -1383,16 +1689,120 @@ fn tsemicolon() -> Token {
     )
 }
 
+fn primitive_type_as_str(token_type: TokenType) -> &'static str {
+    match token_type {
+        TokenType::I8 => "i8",
+        TokenType::U8 => "u8",
+        TokenType::I16 => "i16",
+        TokenType::U16 => "u16",
+        TokenType::I32 => "i32",
+        TokenType::U32 => "u32",
+        TokenType::I64 => "i64",
+        TokenType::U64 => "u64",
+        TokenType::F32 => "f32",
+        TokenType::F64 => "f64",
+        TokenType::Bool => "bool",
+        TokenType::V2 => "v2",
+        TokenType::V3 => "v3",
+        TokenType::V4 => "v4",
+        _ => panic!("can only stringify primitive types")
+    }
+}
+
+macro_rules! ttypean {
+    ($lit:literal $(, $is_mut:expr)?) => {
+        TypeAnnotation {
+            kind: TypeKind::Simple(
+                Type { name: ttoken(TokenType::Identifier, $lit, $lit) }
+            ),
+            // name: ttoken(TokenType::Identifier, $lit, $lit),
+            is_mut: false $(|| $is_mut )?,
+        }
+    };
+    ($t:path $(, $is_mut:expr)?) => {
+        TypeAnnotation {
+            kind: TypeKind::Simple(
+                Type { name: ttoken($t, primitive_type_as_str($t), "") }
+            ),
+            // name: ttoken($t, primitive_type_as_str($t), ""),
+            is_mut: false $(|| $is_mut)?,
+        }
+    };
+}
+
+macro_rules! ttypedecl {
+    ($name:expr, $lit:literal $(, $is_mut:expr)?) => {
+        TypedDeclaration {
+            name: tidentifier($name),
+            declared_type: ttypean!($lit $(, $is_mut)?),
+        }
+    };
+    ($name:expr, $t:path $(, $is_mut:expr)?) => {
+        TypedDeclaration {
+            name: tidentifier($name),
+            declared_type: ttypean!($t $(, $is_mut)?),
+        }
+    };
+}
+
+macro_rules! ttypeanptr {
+     ($lit:literal, $points_to_mut:expr $(, $is_mut:expr)?) => {
+        TypeAnnotation {
+            kind: TypeKind::Pointer(
+                PointerAnnotation {
+                    inner_type: Box::new(TypeKind::Simple(Type {
+                        name: ttoken(TokenType::Identifier, $lit, $lit),
+                    })),
+                    points_to_mut: $points_to_mut
+                },
+            ),
+            is_mut: false $(|| $is_mut )?,
+        }
+    };
+    ($t:path, $points_to_mut:expr $(, $is_mut:expr)?) => {
+        TypeAnnotation {
+            kind: TypeKind::Pointer(
+                PointerAnnotation {
+                    inner_type: Box::new(TypeKind::Simple(Type {
+                        name: ttoken($t, primitive_type_as_str($t), ""),
+                    })),
+                    points_to_mut: $points_to_mut
+                }
+            ),
+            is_mut: false $(|| $is_mut)?,
+        }
+    };
+}
+
+macro_rules! ttypedeclptr {
+    ($name:expr, $lit:literal, $points_to_mut:expr $(, $is_mut:expr)?) => {
+        TypedDeclaration {
+            name: tidentifier($name),
+            declared_type: ttypeanptr!(
+                $lit, $points_to_mut $(, $is_mut)?
+            )
+        }
+    };
+    ($name:expr, $t:path, $points_to_mut:expr $(, $is_mut:expr)?) => {
+        TypedDeclaration {
+            name: tidentifier($name),
+            declared_type: ttypeanptr!(
+                $t, $points_to_mut $(, $is_mut)?
+            )
+        }
+    };
+}
+
 mod tests {
     use rstest::*;
     use crate::syntax::traits::PartialTreeEq;
     use super::*;
-    
+
     pub fn assert_tree_eq(
         expected: Vec<Statement>, actual: Vec<Statement>
     ) {
         let ea = expected.iter().zip(actual).enumerate();
-        
+
         for (i, (expected_statement, actual_statement)) in ea {
             assert!(
                 expected_statement.partial_eq(&actual_statement),
@@ -1401,7 +1811,7 @@ mod tests {
             );
         }
     }
-    
+
     #[rstest]
     #[
         case(
@@ -1423,34 +1833,294 @@ mod tests {
                     token: ttoken(TokenType::Struct, "struct", ""),
                     name: tidentifier("TestStructWithSimpleFields"),
                     fields: vec![
-                        TypedDeclaration {
-                            name: tidentifier("test_field_i8"),
-                            declared_type: TypeAnnotation {
-                                name: ttoken(TokenType::I8, "i8", ""),
-                                is_mut: false,
-                            },
-                        },
-                        TypedDeclaration {
-                            name: tidentifier("test_field_i16"),
-                            declared_type: TypeAnnotation {
-                                name: ttoken(TokenType::I8, "i16", ""),
-                                is_mut: false,
-                            },
-                        },
+                        ttypedecl!("test_field_i8", TokenType::I8),
+                        ttypedecl!("test_field_i16", TokenType::I16),
+                        ttypedecl!("test_field_i32", TokenType::I32),
+                        ttypedecl!("test_field_i64", TokenType::I64),
+                        ttypedecl!("test_field_u8", TokenType::U8),
+                        ttypedecl!("test_field_u16", TokenType::U16),
+                        ttypedecl!("test_field_u32", TokenType::U32),
+                        ttypedecl!("test_field_u64", TokenType::U64),
+                        ttypedecl!("test_field_f32", TokenType::F32),
+                        ttypedecl!("test_field_f64", TokenType::F64),
+                        ttypedecl!("test_field_bool", TokenType::Bool),
                     ]
                 }
             ]
         )
     ]
-    // #[case("./resources/simple/struct_compound_fields.lr")]
-    // #[case("./resources/simple/struct_pointer_fields.lr")]
-    // #[case("./resources/simple/fn_no_args_no_return_empty.lr")]
-    // #[case("./resources/simple/fn_no_args_simple_return_empty.lr")]
-    // #[case("./resources/simple/fn_simple_args_simple_return_empty.lr")]
-    // #[case("./resources/simple/fn_simple_args_simple_return_simple_body.lr")]
+    #[
+        case(
+            "./resources/simple/struct_compound_fields.lr",
+             vec![
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TypeA"),
+                    fields: vec![
+                        ttypedecl!("type_a_field_1", TokenType::I32),
+                    ]
+                },
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TestCompound"),
+                    fields: vec![
+                        ttypedecl!("type_a", "TypeA"),
+                        ttypedecl!("simple_i32", TokenType::I32),
+                    ]
+                }
+            ]
+        )
+    ]
+    #[
+        case(
+            "./resources/simple/struct_pointer_fields.lr",
+            vec![
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TestStructA"),
+                    fields: vec![
+                        ttypedecl!("test_field_i8", TokenType::I8),
+                    ]
+                },
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TestStructWithSimpleFields"),
+                    fields: vec![
+                        ttypedeclptr!(
+                            "test_field_i8", TokenType::I8, false
+                        ),
+                        ttypedeclptr!("test_field_i16", TokenType::I16, true),
+                        ttypedeclptr!("test_field_i32", TokenType::I32, false),
+                        TypedDeclaration {
+                            name: tidentifier("test_field_i64"),
+                            declared_type: TypeAnnotation {
+                                kind: TypeKind::Pointer(PointerAnnotation {
+                                    inner_type: Box::new(TypeKind::Pointer(
+                                        PointerAnnotation {
+                                            inner_type: Box::new(TypeKind::Pointer(
+                                                PointerAnnotation {
+                                                    inner_type: Box::new(
+                                                        TypeKind::Simple(Type {
+                                                            name: ttoken(TokenType::I64, "i64", ""),
+                                                        })
+                                                    ),
+                                                    points_to_mut: true,
+                                                }
+                                            )),
+                                            points_to_mut: false,
+                                        }
+                                    )),
+                                    points_to_mut: true,
+                                }),
+                                is_mut: false,
+                            }
+                        },
+                        ttypedeclptr!("test_field_test_struct_a", "TestStructA", true),
+                    ]
+               },
+            ]
+        )
+    ]
+    #[
+        case(
+            "./resources/simple/fn_no_args_no_return_empty.lr",
+            vec![
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test"),
+                        arguments: vec![],
+                        return_type: None,
+                        body: vec![],
+                    })
+                },
+            ]
+        )
+    ]
+    #[
+        case(
+            "./resources/simple/fn_no_args_simple_return_empty.lr",
+             vec![
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test"),
+                        arguments: vec![],
+                        return_type: Some(ttypean!(TokenType::I32)),
+                        body: vec![],
+                    })
+                },
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TestA"),
+                    fields: vec![],
+                },
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test2"),
+                        arguments: vec![],
+                        return_type: Some(ttypean!("TestA")),
+                        body: vec![],
+                    })
+                },
+            ]
+        )
+    ]
+    #[
+        case(
+            "./resources/simple/fn_simple_args_simple_return_empty.lr",
+            vec![
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test"),
+                        arguments: vec![
+                            ttypedecl!("a_i32", TokenType::I32),
+                            ttypedecl!("b_i64", TokenType::I64),
+                        ],
+                        return_type: Some(ttypean!(TokenType::I32)),
+                        body: vec![],
+                    })
+                },
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TestA"),
+                    fields: vec![],
+                },
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test2"),
+                        arguments: vec![
+                            ttypedecl!("a1", TokenType::I8),
+                            ttypedecl!("a2", TokenType::I16),
+                            ttypedecl!("a3", TokenType::I32),
+                            ttypedecl!("a4", TokenType::I64),
+                            ttypedecl!("a5", TokenType::U8),
+                            ttypedecl!("a6", TokenType::U16, true),
+                            ttypedecl!("a7", TokenType::U32, true),
+                            ttypedecl!("a8", TokenType::U64, true),
+                            ttypedecl!("a9", "TestA", true),
+                        ],
+                        return_type: Some(ttypean!("TestA")),
+                        body: vec![],
+                    })
+                },
+            ]
+        )
+    ]
+    #[
+        case(
+            "./resources/simple/fn_simple_args_simple_return_simple_body.lr",
+            vec![
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test"),
+                        arguments: vec![
+                            ttypedecl!("a_i32", TokenType::I32),
+                            ttypedecl!("b_i64", TokenType::I64),
+                        ],
+                        return_type: Some(ttypean!(TokenType::I32)),
+                        body: vec![
+                            Statement::ReturnStatement {
+                                token: ttoken(TokenType::Return, "return", ""),
+                                expression: Some(Box::new(Expression::Literal(Literal::I32 {
+                                    token: ttoken(TokenType::I32Literal, "i32", ""),
+                                    value: 5,
+                                })))
+                            }
+                        ],
+                    })
+                },
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("TestA"),
+                    fields: vec![],
+                },
+                Statement::FnStatement {
+                    token: ttoken(TokenType::Fn, "fn", ""),
+                    function: ImplFunction::Function(Function {
+                        name: tidentifier("test2"),
+                        arguments: vec![
+                            ttypedecl!("a1", TokenType::I8),
+                            ttypedecl!("a2", TokenType::I16),
+                            ttypedecl!("a3", TokenType::I32),
+                            ttypedecl!("a4", TokenType::I64),
+                            ttypedecl!("a5", TokenType::U8),
+                            ttypedecl!("a6", TokenType::U16, true),
+                            ttypedecl!("a7", TokenType::U32, true),
+                            ttypedecl!("a8", TokenType::U64, true),
+                            ttypedecl!("a9", "TestA", true),
+                        ],
+                        return_type: Some(ttypean!("TestA")),
+                        body: vec![],
+                    })
+                },
+            ]
+        )
+    ]
     // #[case("./resources/simple/fn_pointer_args_pointer_return_simple_body.lr")]
-    // #[case("./resources/simple/impl_empty.lr")]
-    // #[case("./resources/simple/impl_simple.lr")]
+    #[
+        case(
+            "./resources/simple/impl_empty.lr",
+            vec![
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("Test"),
+                    fields: vec![],
+                },
+                Statement::ImplStatement {
+                    token: ttoken(TokenType::Impl, "impl", ""),
+                    implemented_type: tidentifier("Test"),
+                    top_level_statements: vec![],
+                    functions: vec![],
+                }
+            ]
+        )
+    ]
+    #[
+        case(
+            "./resources/simple/impl_simple.lr",
+            vec![
+                Statement::StructStatement {
+                    token: ttoken(TokenType::Struct, "struct", ""),
+                    name: tidentifier("Test"),
+                    fields: vec![],
+                },
+                Statement::ImplStatement {
+                    token: ttoken(TokenType::Impl, "impl", ""),
+                    implemented_type: tidentifier("Test"),
+                    top_level_statements: vec![],
+                    functions: vec![
+                        ImplFunction::Function(Function {
+                            name: tidentifier("function"),
+                            arguments: vec![],
+                            return_type: None,
+                            body: vec![],
+                        }),
+                        ImplFunction::Function(Function {
+                            name: tidentifier("function2"),
+                            arguments: vec![
+                                ttypedecl!("a", TokenType::I32),
+                            ],
+                            return_type: Some(ttypean!(TokenType::I64)),
+                            body: vec![
+                                Statement::ReturnStatement {
+                                    token: ttoken(TokenType::Return, "return", ""),
+                                    expression: Some(Box::new(Expression::Literal(Literal::I32 {
+                                        token: ttoken(TokenType::I32Literal, "i32", ""),
+                                        value: 5,
+                                    })))
+                                }
+                            ],
+                        }),
+                    ],
+                }
+            ]
+        )
+    ]
     // #[case("./resources/simple/impl_methods_and_functions.lr")]
     // #[case("./resources/simple/impl_consts_and_statics_methods_and_functions.lr")]
     pub fn test_simple_statements(
@@ -1458,9 +2128,9 @@ mod tests {
         #[case] expected_statements: Vec<Statement>,
     ) {
         let mut parser = create_test_parser(source_code);
-        
+
         let ast = parser.parse_panic();
-    
+
         assert_tree_eq(expected_statements, ast);
     }
 }
