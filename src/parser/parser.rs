@@ -114,6 +114,7 @@ pub enum ParserError {
     InitializerRequired(InitializerRequiredError),
     LiteralParseError(LiteralParseError),
     UnexpectedPrimaryExpression(Token),
+    UnterminatedArraySlice(Token),
     ParseError(ParseError),
     CompoundError(Vec<ParserError>)
 }
@@ -139,6 +140,8 @@ impl Display for ParserError {
                 write!(f, "{}", err),
             Self::UnexpectedPrimaryExpression(t) =>
                 write!(f, "unexpected primary expression token {}", t),
+            Self::UnterminatedArraySlice(t) =>
+                write!(f, "unterminated array slice for {}", t),
             Self::ParseError(t) => write!(f, "Uncategorized error: {}", t),
             Self::CompoundError(errors) => {
                 let mut messages = vec![];
@@ -173,7 +176,7 @@ impl ParserError {
     pub fn initializer_required(identifier: Token, message: &'static str) -> Self {
         Self::InitializerRequired(InitializerRequiredError { identifier, message })
     }
-    
+
     pub fn literal_parse_error(token: Token, to: &'static str) -> Self {
         Self::LiteralParseError(LiteralParseError {
             token,
@@ -237,6 +240,11 @@ impl Parser {
                 _ => return Some(token.clone())
             }
         }
+    }
+    
+    fn advance_and_skip_next_comments(&mut self) -> Option<Token> {
+        self.advance()?;
+        self.advance_skipping_comments()
     }
 
     #[inline(always)]
@@ -331,7 +339,7 @@ impl Parser {
                 msg
             )));
         };
-        
+
         if token_types.contains(&token.token_type) {
             Ok(Some(token))
         } else {
@@ -1521,7 +1529,35 @@ impl Parser {
     }
 
     fn array_slice(&mut self) -> ParserResult<Expression> {
-        self.call()
+        let mut expr = self.call()?;
+
+        loop {
+            let Some(open_token) = self.match_current(
+                TokenType::LeftBracket, "array slice"
+            )? else {
+                return Ok(expr);
+            };
+
+            self.advance_and_skip_next_comments();
+
+            let slice_expression = self.parse_expression()?;
+
+            let Some(_) = self.match_current(
+                TokenType::RightBracket, "array slice closing bracket"
+            )? else {
+                return Err(self.wrap_error(ParserError::UnterminatedArraySlice(
+                    open_token
+                )));
+            };
+
+            self.advance_and_skip_next_comments();
+
+            expr = Expression::ArraySlice {
+                token: open_token,
+                array_expression: Box::new(expr),
+                slice_expression: Box::new(slice_expression),
+            };
+        }
     }
 
     fn unary(&mut self) -> ParserResult<Expression> {
@@ -1530,10 +1566,10 @@ impl Parser {
         )? else {
             return self.array_slice();
         };
-        
+
         // todo: maybe error: parse array slice
         let expression = self.parse_expression()?;
-        
+
         Ok(Expression::Unary {
             token: token.clone(),
             operator: token,

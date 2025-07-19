@@ -177,7 +177,11 @@ pub enum Expression {
     MethodCall(),
     DotAccess(),
     Call(),
-    ArraySlice(),
+    ArraySlice {
+        token: Token,
+        array_expression: Box<Expression>,
+        slice_expression: Box<Expression>,
+    },
     Unary {
         token: Token,
         operator: Token,
