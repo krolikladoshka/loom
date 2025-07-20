@@ -1,3 +1,3 @@
 pub mod asserts;
-pub mod tests;
+pub mod test_utils;
 pub mod literals;

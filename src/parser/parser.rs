@@ -1,219 +1,15 @@
-use std::collections::HashMap;
-use std::env;
-use std::fmt::Display;
-use std::fs::read_to_string;
-use std::path::Path;
-use std::str::FromStr;
+use crate::parser::errors::ParserError;
 use crate::syntax::ast::{
-    Literal, Expression, Function,
-    ImplFunction, Method, Statement,
-    TypeAnnotation, TypeKind, TypedDeclaration,
-    Type, PointerAnnotation, Identifier
+    Expression, Function, ImplFunction,
+    Literal, Method, PointerAnnotation,
+    Statement, Type, TypeAnnotation,
+    TypeKind, TypedDeclaration
 };
-use crate::syntax::lexer::{Lexer, Token};
+use crate::syntax::lexer::Token;
 use crate::syntax::tokens::TokenType;
-
-#[derive(Debug, Clone)]
-pub struct ParseError {
-    pub message: String,
-    pub line: usize,
-    pub column: usize,
-    pub position: usize
-}
-
-impl Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "{} at p{}:l{}:c{}",
-            self.message, self.position,
-            self.line, self.column
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UnexpectedTokenError {
-    pub found: Token,
-    pub expected: TokenType,
-    pub message: &'static str,
-}
-
-impl Display for UnexpectedTokenError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "unexpected token: expected {:?} [{}] but got {}",
-            self.expected, self.message, self.found,
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct UnexpectedEofError {
-    pub expected: TokenType,
-    pub message: &'static str,
-}
-
-impl Display for UnexpectedEofError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "unexpected end of stream: expected {:?} [{}]",
-            self.expected, self.message
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct TypeAnnotationRequiredError {
-    pub identifier: Token,
-    pub message: &'static str,
-}
-
-impl Display for TypeAnnotationRequiredError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "expected type annotation for {} [{}]",
-            self.identifier, self.message
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct InitializerRequiredError {
-    pub identifier: Token,
-    pub message: &'static str,
-}
-
-impl Display for InitializerRequiredError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "expected initializer for {} [{}]",
-            self.identifier, self.message
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LiteralParseError {
-    pub token: Token,
-    pub to: &'static str
-}
-
-impl Display for LiteralParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "couldn't parse literal from token {} into {}",
-            self.token, self.to
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DuplicatedStructInitializerFieldError {
-    pub struct_name: Token,
-    pub field_name: Token,
-}
-
-impl Display for DuplicatedStructInitializerFieldError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "duplicated struct initializer field {} for {}",
-            self.field_name, self.struct_name
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ParserError {
-    EmptyStream,
-    UnrecognizedToken(Token),
-    UnexpectedToken(UnexpectedTokenError),
-    UnexpectedEof(UnexpectedEofError),
-    UnexpectedTopLevelStatement(Token),
-    UnexpectedStatement(Token),
-    TypeAnnotationRequired(TypeAnnotationRequiredError),
-    InitializerRequired(InitializerRequiredError),
-    DuplicatedStructInitializerField(DuplicatedStructInitializerFieldError),
-    LiteralParseError(LiteralParseError),
-    UnexpectedPrimaryExpression(Token),
-    UnterminatedArraySlice(Token),
-    ParseError(ParseError),
-    CompoundError(Vec<ParserError>)
-}
-
-impl Display for ParserError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParserError::EmptyStream => write!(f, "Empty stream"),
-            Self::UnrecognizedToken(token) => write!(f, "Unrecognized token: {}", token),
-            Self::UnexpectedToken(unexpected_token_error) =>
-                write!(f, "{}", unexpected_token_error),
-            Self::UnexpectedEof(unexpected_eof_error) =>
-                write!(f, "{}", unexpected_eof_error),
-            Self::UnexpectedTopLevelStatement(utls) =>
-                write!(f, "{}", utls),
-            Self::UnexpectedStatement(us) =>
-                write!(f, "Unexpected statement {}", us),
-            Self::TypeAnnotationRequired(t) =>
-                write!(f, "{}", t),
-            Self::InitializerRequired(t) =>
-                write!(f, "{}", t),
-            Self::DuplicatedStructInitializerField(d) =>
-                write!(f, "{}", d),
-            Self::LiteralParseError(err) =>
-                write!(f, "{}", err),
-            Self::UnexpectedPrimaryExpression(t) =>
-                write!(f, "unexpected primary expression token {}", t),
-            Self::UnterminatedArraySlice(t) =>
-                write!(f, "unterminated array slice for {}", t),
-            Self::ParseError(t) => write!(f, "Uncategorized error: {}", t),
-            Self::CompoundError(errors) => {
-                let mut messages = vec![];
-                for error in errors {
-                    messages.push(format!("1:\n\t{}", error));
-                }
-
-                messages.join("\n").fmt(f)
-            }
-        }
-    }
-}
-
-
-impl ParserError {
-    pub fn unexpected_token(found: Token, expected: TokenType, message: &'static str) -> Self {
-        Self::UnexpectedToken(UnexpectedTokenError { found, expected, message})
-    }
-
-    pub fn unexpected_eof(expected: TokenType, message: &'static str) -> Self {
-        Self::UnexpectedEof(UnexpectedEofError { expected, message })
-    }
-
-    pub fn error(message: String, line: usize, column: usize, position: usize) -> Self {
-        Self::ParseError(ParseError { message, line, column, position })
-    }
-
-    pub fn type_annotation_required(identifier: Token, message: &'static str) -> Self {
-        Self::TypeAnnotationRequired(TypeAnnotationRequiredError { identifier, message })
-    }
-
-    pub fn initializer_required(identifier: Token, message: &'static str) -> Self {
-        Self::InitializerRequired(InitializerRequiredError { identifier, message })
-    }
-
-    pub fn literal_parse_error(token: Token, to: &'static str) -> Self {
-        Self::LiteralParseError(LiteralParseError {
-            token,
-            to,
-        })
-    }
-
-    pub fn duplicated_struct_initializer_field(struct_name: Token, field_name: Token) -> Self {
-        Self::DuplicatedStructInitializerField(DuplicatedStructInitializerFieldError {
-            struct_name, field_name
-        })
-    }
-}
-
+use std::collections::HashMap;
+use std::fmt::{Debug, Display};
+use std::str::FromStr;
 
 type ParserResult<T> = Result<T, ParserError>;
 
@@ -336,7 +132,7 @@ impl Parser {
             TokenType::U8, TokenType::U16,
             TokenType::U32, TokenType::U64,
             TokenType::F32, TokenType::F64,
-            TokenType::Bool,
+            TokenType::Bool, TokenType::Char,
         ];
 
         let Some(token) = self.peek().cloned() else {
@@ -378,7 +174,7 @@ impl Parser {
         }
     }
 
-    fn parse_panic(&mut self) -> Vec<Statement> {
+    pub(crate) fn parse_panic(&mut self) -> Vec<Statement> {
         self.panic_on_error = true;
 
         let (result, _) = self.parse();
@@ -386,7 +182,7 @@ impl Parser {
         result
     }
 
-    pub fn parse(&mut self) -> (Vec<Statement>, Option<ParserError>) {
+    pub fn parse(&mut self) -> (Vec<Statement>, Option<Vec<ParserError>>) {
         let mut ast = vec![];
         let mut errors = vec![];
 
@@ -411,7 +207,7 @@ impl Parser {
         let error = if errors.is_empty() {
             None
         } else {
-            Some(ParserError::CompoundError(errors))
+            Some(errors)
         };
 
         (ast, error)
@@ -475,7 +271,7 @@ impl Parser {
         }
     }
 
-    fn impl_pub_statement(&mut self) -> ParserResult<Statement> {
+    fn impl_pub_statement(&mut self, implemented_type: Token) -> ParserResult<Statement> {
         let pub_token = match self.peek().cloned() {
             Some(token) => if token.token_type == TokenType::Pub {
                 self.advance();
@@ -493,11 +289,28 @@ impl Parser {
         };
 
         // TODO: set pub modifier
-        let statement = self.variable_declarations_and_functions()?;
+        let statement = self.impl_variable_declarations_and_functions(
+            implemented_type
+        )?;
+        // let statement = self.variable_declarations_and_functions()?;
 
         Ok(statement)
     }
+    
+    fn impl_variable_declarations_and_functions(
+        &mut self,
+        implemented_type: Token,
+    ) -> ParserResult<Statement> {
+        self.advance_skipping_comments();
+        let token = self.peek_protected()?.clone();
 
+        match token.token_type {
+            TokenType::Static => self.static_variable_statement(),
+            TokenType::Const => self.const_variable_statement(),
+            TokenType::Fn => self.impl_function_statement(implemented_type),
+            _ => Err(self.wrap_error(ParserError::UnexpectedStatement(token))),
+        }
+    }
     fn variable_declarations_and_functions(&mut self) -> ParserResult<Statement> {
         self.advance_skipping_comments();
         let token = self.peek_protected()?.clone();
@@ -529,6 +342,50 @@ impl Parser {
         }
     }
 
+    fn defer_statement(&mut self) -> ParserResult<Statement> {
+        let token = self.require(
+            TokenType::Defer,
+            "expected 'defer' keyword"
+        )?;
+
+        let expr = self.parse_expression()?;
+        match expr {
+            Expression::Call {..} | Expression::MethodCall {..} |
+            Expression::Identifier {..} => Ok(
+                Statement::DeferStatement {
+                    token,
+                    call_expression: Box::new(expr),
+                    to_closest_block: false
+                }
+            ),
+            _ => Err(self.wrap_error(ParserError::defer_non_callable_argument(
+                token
+            )))
+        }
+    }
+
+    fn defer_block_statement(&mut self) -> ParserResult<Statement> {
+        let token = self.require(
+            TokenType::DeferBlock,
+            "expected 'defer block' keyword"
+        )?;
+
+        let expr = self.parse_expression()?;
+        match expr {
+            Expression::Call {..} | Expression::MethodCall {..} |
+            Expression::Identifier {..} => Ok(
+                Statement::DeferStatement {
+                    token,
+                    call_expression: Box::new(expr),
+                    to_closest_block: true
+                }
+            ),
+            _ => Err(self.wrap_error(ParserError::defer_non_callable_argument(
+                token
+            )))
+        }
+    }
+
     fn statement(&mut self) -> ParserResult<Statement> {
         self.advance_skipping_comments();
         let token = self.peek_protected()?.clone();
@@ -542,8 +399,11 @@ impl Parser {
             TokenType::Struct => self.struct_statement(),
             TokenType::EnumStruct => todo!(), // self.enum_struct_statement(),
             TokenType::UnionStruct => todo!(), // self.union_struct_statement(),
-            TokenType::Defer => todo!("defer statement"), // self.defer_statement(),
+            TokenType::Defer => self.defer_statement(), // self.defer_statement(),
+            TokenType::DeferBlock => self.defer_block_statement(),
             TokenType::Use => todo!("use statement"), // self.use_statement(),
+            TokenType::If => self.if_else_statement(),
+            TokenType::Loop => self.loop_statement(),
             TokenType::While => self.while_statement(),
             TokenType::Break => self.break_statement(),
             TokenType::Continue => self.continue_statement(),
@@ -689,8 +549,7 @@ impl Parser {
         let variable_type =
             if token.token_type == TokenType::Colon {
 
-                self.advance();
-                self.advance_skipping_comments();
+                self.advance_and_skip_next_comments();
                 Some(self.type_annotation(no_mut)?)
         } else {
             None
@@ -698,6 +557,8 @@ impl Parser {
 
         let token = self.peek_protected()?;
         let initializer = if token.token_type == TokenType::Equals {
+            self.advance_and_skip_next_comments();
+
             Some(Box::new(self.parse_expression()?))
         } else {
             None
@@ -712,6 +573,14 @@ impl Parser {
             "expected 'let'",
         )?;
 
+        let mut is_mut = false;
+        if let Some(_) = self.match_current(
+            TokenType::Mut, "expected mut modifier"
+        )? {
+            self.advance_and_skip_next_comments();
+            is_mut = true;
+        }
+
         let result = self.common_variable_declaration(
             false,
             |identifier, type_annotation, initializer|
@@ -719,7 +588,8 @@ impl Parser {
                     token: let_token,
                     name: identifier,
                     variable_type: type_annotation,
-                    initializer
+                    initializer,
+                    is_mut,
                 })
         )?;
 
@@ -736,6 +606,14 @@ impl Parser {
             TokenType::Static,
             "expected 'static'",
         )?;
+
+        let mut is_mut = false;
+        if let Some(_) = self.match_current(
+            TokenType::Mut, "expected mut modifier"
+        )? {
+            self.advance_and_skip_next_comments();
+            is_mut = true;
+        }
 
         let result = self.common_variable_declaration(
             false,
@@ -759,7 +637,8 @@ impl Parser {
                     token,
                     name: identifier,
                     variable_type: annotation,
-                    initializer
+                    initializer,
+                    is_mut
                 })
             }
         )?;
@@ -796,11 +675,11 @@ impl Parser {
                     ))
                 };
 
-                Ok(Statement::StaticStatement {
+                Ok(Statement::ConstStatement {
                     token,
                     name: identifier,
                     variable_type: annotation,
-                    initializer
+                    initializer,
                 })
             }
         )?;
@@ -904,10 +783,11 @@ impl Parser {
                 break;
             }
 
-            if arguments.len() < 1 {
-                if token.token_type == TokenType::Star {
-                    self.advance();
-                }
+            if arguments.len() < 1 && token.token_type == TokenType::Star {
+                // if token.token_type == TokenType::Star {
+                self.advance();
+                    // is_bound_method = true
+                // }
                 is_bound_method = true;
 
                 let Some(mut_token) = self.peek().cloned() else {
@@ -929,6 +809,7 @@ impl Parser {
                 let typed_declaration = self.function_argument(token)?;
                 arguments.push(typed_declaration);
             }
+            
             let token = match self.peek() {
                 Some(token) => token,
                 None => return Err(self.wrap_error(ParserError::unexpected_eof(
@@ -941,11 +822,6 @@ impl Parser {
                 break;
             }
         }
-
-        self.require(
-            TokenType::RightParenthesis,
-            "expected ')' after arguments list"
-        )?;
 
         let (type_identifier, body) = self.function_end()?;
 
@@ -1049,12 +925,6 @@ impl Parser {
                     )
                 ));
             };
-            // let Some(token) = self.peek().cloned() else {
-            //     return Err(self.wrap_error(ParserError::unexpected_eof(
-            //         TokenType::Identifier,
-            //         "expected struct definition after '{' after 'struct'"
-            //     )))
-            // };
 
             if token.token_type == TokenType::RightBrace {
                 break;
@@ -1143,7 +1013,7 @@ impl Parser {
                 break;
             }
 
-            let statement = self.impl_pub_statement()?;
+            let statement = self.impl_pub_statement(name.clone())?;
 
             match statement {
                 Statement::StaticStatement { .. } | Statement::ConstStatement { .. } =>
@@ -1184,12 +1054,66 @@ impl Parser {
         Ok(statement)
     }
 
+    fn if_else_statement(&mut self) -> ParserResult<Statement> {
+        let if_token = self.require(
+            TokenType::If,
+            "expected 'if' keyword"
+        )?;
+
+        self.advance_skipping_comments();
+
+        let condition = self.parse_before_block_expression()?;
+        let statements = self.parse_block_of_statements()?;
+
+        let else_block = if let Some(else_token) = self.match_current(
+            TokenType::Else,
+            "expect 'else keyword"
+        )? {
+            self.advance_and_skip_next_comments();
+
+            if let Some(_) = self.match_current(
+                TokenType::If,
+                "expect 'if' keyword"
+            )? {
+                let if_else_statement = self.if_else_statement()?;
+
+                Some(vec![if_else_statement])
+            } else {
+                Some(self.parse_block_of_statements()?)
+            }
+        } else {
+            None
+        };
+
+        Ok(Statement::IfElseStatement {
+            token: if_token,
+            condition: Box::new(condition),
+            then_branch: statements,
+            else_branch: else_block,
+        })
+    }
+    fn loop_statement(&mut self) -> ParserResult<Statement> {
+        let token = self.require(
+            TokenType::Loop, "expected 'loop' keyword"
+        )?;
+        let statements = self.parse_block_of_statements()?;
+
+        Ok(Statement::WhileStatement {
+            token: token.clone(),
+            condition: Box::new(Expression::Literal(Literal::Bool {
+                token, // TODO: wlel
+                value: true
+            })),
+            body: statements
+        })
+    }
+
     fn while_statement(&mut self) -> ParserResult<Statement> {
         let token = self.require(
             TokenType::While, "expected 'while' keyword"
         )?;
 
-        let condition = self.parse_expression()?;
+        let condition = self.parse_before_block_expression()?;
         let statements = self.parse_block_of_statements()?;
 
         let while_statement = Statement::WhileStatement {
@@ -1513,6 +1437,10 @@ impl Parser {
                 token: token.clone(),
                 value: self.token_as_literal(&token)?,
             },
+            TokenType::StringLiteral => Literal::String {
+                token: token.clone(),
+                value: token.literal.clone(),
+            },
             // },TokenType::U16Literal |
             // TokenType::U32Literal | TokenType::U64Literal |
             // TokenType::I8Literal | TokenType::I16Literal |
@@ -1527,6 +1455,7 @@ impl Parser {
                 token
             )))
         };
+        self.advance_and_skip_next_comments();
 
         Ok(Expression::Literal(literal))
     }
@@ -1602,29 +1531,37 @@ impl Parser {
             Ok(Expression::Identifier { name })
         }
     }
-    fn primary(&mut self) -> ParserResult<Expression> {
-        self.advance_skipping_comments();
 
-        let current_token = match self.peek() {
-            Some(token) => token,
-            _ => return Err(self.wrap_error(ParserError::unexpected_eof(
-                TokenType::Identifier,
-                "expected primary token"
-            )))
+    fn as_operator(&mut self, expr: Expression, is_raw: bool) -> ParserResult<Expression> {
+        let operator_token = if is_raw {
+            self.require(
+                TokenType::AsRaw,
+                "as raw operator in postfix expression"
+            )?
+        } else {
+            self.require(
+                TokenType::As,
+                "as operator in postfix expression",
+            )?
         };
 
-        match current_token.token_type {
-            TokenType::Identifier => self.identifier_or_initializer(),
-            TokenType::LeftParenthesis => self.grouping(),
-            TokenType::If => self.if_else_expression(),
-            TokenType::Fn => self.function_expression(),
-            TokenType::SelfToken => self.self_expression(),
-            _ => self.literal()
-        }
+        self.advance_skipping_comments();
+
+        let target_type = self.type_annotation(false)?;
+
+        Ok(Expression::Cast {
+            token: operator_token,
+            left: Box::new(expr),
+            target_type,
+            is_reinterpret_cast: is_raw,
+        })
     }
 
-    fn dot(&mut self) -> ParserResult<Expression> {
-        let mut expr = self.primary()?;
+    fn dot_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
+    where
+        Op: Fn(&mut Self) -> ParserResult<Expression>
+    {
+        let mut expr = operand(self)?;
 
         loop {
             let Some(access_operator) = self.match_tokens(
@@ -1664,8 +1601,11 @@ impl Parser {
     }
 
     // TODO: basically the same as array slice `higher_precedence` `OP_TOKEN` `expr`* `CLOSE_TOKEN`
-    fn call(&mut self) -> ParserResult<Expression> {
-        let mut expr = self.dot()?;
+    fn call_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
+    where
+        Op: Fn(&mut Self) -> ParserResult<Expression>
+    {
+        let mut expr = operand(self)?;
 
         loop {
             let Some(open_token) = self.match_current(
@@ -1705,8 +1645,11 @@ impl Parser {
         }
     }
 
-    fn array_slice(&mut self) -> ParserResult<Expression> {
-        let mut expr = self.call()?;
+    fn array_slice_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
+    where
+        Op: Fn(&mut Self) -> ParserResult<Expression>,
+    {
+        let mut expr = operand(self)?;
 
         loop {
             let Some(open_token) = self.match_current(
@@ -1737,16 +1680,20 @@ impl Parser {
         }
     }
 
-    fn unary(&mut self) -> ParserResult<Expression> {
+    fn unary_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
+    where
+        Op: Fn(&mut Self) -> ParserResult<Expression>
+    {
         let Some(token) = self.match_tokens(
             TokenType::UNARY_OPERATORS, "unary operator"
         )? else {
-            return self.array_slice();
+            return operand(self);
         };
-
+        
+        self.advance_and_skip_next_comments();
         // todo: maybe error: parse array slice
         // let expression = self.parse_expression()?;
-        let expression = self.array_slice()?;
+        let expression = operand(self)?;
 
         Ok(Expression::Unary {
             token: token.clone(),
@@ -1755,8 +1702,26 @@ impl Parser {
         })
     }
 
-    fn postfix(&mut self) -> ParserResult<Expression> {
-        self.unary()
+    fn postfix_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
+    where
+        Op: Fn(&mut Self) -> ParserResult<Expression>
+    {
+        let left = operand(self)?;
+
+        self.advance_skipping_comments();
+
+        if let Some(postfix_token) = self.match_tokens(
+            TokenType::POSTFIX_OPERATORS,
+            "posfix operator"
+        )? {
+            match postfix_token.token_type {
+                TokenType::As => self.as_operator(left, false),
+                TokenType::AsRaw => self.as_operator(left, true),
+                _ => Ok(left),
+            }
+        } else {
+            Ok(left)
+        }
     }
 
     fn parse_left_associative<F>(
@@ -1782,6 +1747,96 @@ impl Parser {
         Ok(expr)
     }
 
+    pub fn parse_assignment_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
+    where
+        Op: Fn(&mut Self) -> ParserResult<Expression>
+    {
+        let left = operand(self)?;
+
+        if let Some(assignment_operator) =  self.match_tokens(
+            TokenType::ASSIGNMENT_OPERATORS,
+            "assignment operators"
+        )?
+        {
+            self.advance_and_skip_next_comments();
+
+            let right = self.parse_assignment_with_op(operand)?;
+
+            let expression = match assignment_operator.token_type {
+                TokenType::Equals => Expression::Assignment {
+                    token: assignment_operator,
+                    lhs: Box::new(left),
+                    rhs: Box::new(right),
+                },
+                TokenType::PlusEquals | TokenType::MinusEquals |
+                TokenType::StarEquals | TokenType::SlashEquals |
+                TokenType::PercentEquals | TokenType::BinaryInvertEquals |
+                TokenType::BinaryOrEquals | TokenType::BinaryXorEquals |
+                TokenType::BinaryAndEquals => Expression::InplaceAssignment {
+                    token: assignment_operator.clone(),
+                    lhs: Box::new(left),
+                    operator: assignment_operator,
+                    rhs: Box::new(right),
+                },
+                _ => return Err(self.wrap_error(ParserError::unexpected_token(
+                    assignment_operator,
+                    TokenType::Equals,
+                    "expected an assignment operator"
+                )))
+            };
+
+            Ok(expression)
+        } else {
+            Ok(left)
+        }
+    }
+
+    fn primary(&mut self) -> ParserResult<Expression> {
+        self.advance_skipping_comments();
+
+        let current_token = match self.peek() {
+            Some(token) => token,
+            _ => return Err(self.wrap_error(ParserError::unexpected_eof(
+                TokenType::Identifier,
+                "expected primary token"
+            )))
+        };
+
+        match current_token.token_type {
+            TokenType::Identifier => self.identifier_or_initializer(),
+            TokenType::LeftParenthesis => self.grouping(),
+            TokenType::If => self.if_else_expression(),
+            TokenType::Fn => self.function_expression(),
+            TokenType::SelfToken => self.self_expression(),
+            _ => self.literal()
+        }
+    }
+
+    #[inline(always)]
+    fn dot(&mut self) -> ParserResult<Expression> {
+        self.dot_with_op(Self::primary)
+    }
+
+    #[inline(always)]
+    fn call(&mut self) -> ParserResult<Expression> {
+        self.call_with_op(Self::dot)
+    }
+
+    fn array_slice(&mut self) -> ParserResult<Expression> {
+        self.array_slice_with_op(Self::call)
+    }
+
+    #[inline(always)]
+    fn unary(&mut self) -> ParserResult<Expression> {
+        self.unary_with_op(Self::array_slice)
+    }
+
+    #[inline(always)]
+    fn postfix(&mut self) -> ParserResult<Expression> {
+        self.postfix_with_op(Self::unary)
+    }
+
+    #[inline(always)]
     fn multiplicative(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::postfix,
@@ -1789,6 +1844,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn additive(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::multiplicative,
@@ -1796,6 +1852,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn binary_shifts(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::additive,
@@ -1803,6 +1860,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn bitwise_and(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::binary_shifts,
@@ -1810,6 +1868,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn bitwise_xor(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::bitwise_and,
@@ -1817,6 +1876,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn bitwise_or(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::bitwise_xor,
@@ -1824,6 +1884,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn comparisons(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::bitwise_or,
@@ -1831,6 +1892,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn logical_and(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::comparisons,
@@ -1838,6 +1900,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn logical_or(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::logical_and,
@@ -1845,6 +1908,7 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
     fn ranges(&mut self) -> ParserResult<Expression> {
         self.parse_left_associative(
             Self::logical_or,
@@ -1852,553 +1916,150 @@ impl Parser {
         )
     }
 
+    #[inline(always)]
+    fn parse_assignment(&mut self) -> ParserResult<Expression> {
+        self.parse_assignment_with_op(Self::ranges)
+    }
+
+    #[inline(always)]
     pub fn parse_expression(&mut self) -> ParserResult<Expression> {
-        self.ranges()
+        // self.ranges()
+        self.parse_assignment()
     }
-}
 
+    fn primary_before_block(&mut self) -> ParserResult<Expression> {
+        self.advance_skipping_comments();
 
-/////////////////////////////////////////
+        let current_token = match self.peek() {
+            Some(token) => token,
+            _ => return Err(self.wrap_error(ParserError::unexpected_eof(
+                TokenType::Identifier,
+                "expected primary token"
+            )))
+        };
 
-fn create_test_parser(filepath: &'static str) -> Parser {
-    println!("cwd: {}", env::current_dir().unwrap().display());
-    let file = read_to_string(Path::new(filepath)).unwrap();
-    let mut lexer = Lexer::new(file);
-    let tokens = lexer.lex();
-
-    let parser = Parser::new(tokens);
-
-    parser
-}
-
-fn ttoken(
-    token_type: TokenType,
-    lexeme: &'static str,
-    literal: &'static str,
-) -> Token {
-    Token::new(
-        token_type,
-        String::from(lexeme),
-        String::from(literal),
-        0,
-        0,
-    )
-}
-
-fn tidentifier(lexeme: &'static str) -> Token {
-    Token::new(
-        TokenType::Identifier,
-        String::from(lexeme),
-        String::from(lexeme),
-        0,
-        0,
-    )
-}
-
-fn tsemicolon() -> Token {
-    Token::new(
-        TokenType::Semicolon,
-        String::from(";"),
-        String::default(),
-        0,
-        0,
-    )
-}
-
-fn primitive_type_as_str(token_type: TokenType) -> &'static str {
-    match token_type {
-        TokenType::I8 => "i8",
-        TokenType::U8 => "u8",
-        TokenType::I16 => "i16",
-        TokenType::U16 => "u16",
-        TokenType::I32 => "i32",
-        TokenType::U32 => "u32",
-        TokenType::I64 => "i64",
-        TokenType::U64 => "u64",
-        TokenType::F32 => "f32",
-        TokenType::F64 => "f64",
-        TokenType::Bool => "bool",
-        TokenType::V2 => "v2",
-        TokenType::V3 => "v3",
-        TokenType::V4 => "v4",
-        _ => panic!("can only stringify primitive types")
-    }
-}
-
-fn primitive_op_as_str(token_type: TokenType) -> &'static str {
-    match token_type {
-        TokenType::Star => "*",
-        TokenType::Plus => "+",
-        TokenType::Minus => "-",
-        TokenType::Slash => "/",
-        TokenType::Percent => "%",
-        _ => panic!("can only stringify primitive operators")
-    }
-}
-
-macro_rules! ttypean {
-    ($lit:literal $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Simple(
-                Type { name: ttoken(TokenType::Identifier, $lit, $lit) }
-            ),
-            // name: ttoken(TokenType::Identifier, $lit, $lit),
-            is_mut: false $(|| $is_mut )?,
-        }
-    };
-    ($t:path $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Simple(
-                Type { name: ttoken($t, primitive_type_as_str($t), "") }
-            ),
-            // name: ttoken($t, primitive_type_as_str($t), ""),
-            is_mut: false $(|| $is_mut)?,
-        }
-    };
-}
-
-macro_rules! ttypedecl {
-    ($name:expr, $lit:literal $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypean!($lit $(, $is_mut)?),
-        }
-    };
-    ($name:expr, $t:path $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypean!($t $(, $is_mut)?),
-        }
-    };
-}
-
-macro_rules! ttypeanptr {
-     ($lit:literal, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Pointer(
-                PointerAnnotation {
-                    inner_type: Box::new(TypeKind::Simple(Type {
-                        name: ttoken(TokenType::Identifier, $lit, $lit),
-                    })),
-                    points_to_mut: $points_to_mut
-                },
-            ),
-            is_mut: false $(|| $is_mut )?,
-        }
-    };
-    ($t:path, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Pointer(
-                PointerAnnotation {
-                    inner_type: Box::new(TypeKind::Simple(Type {
-                        name: ttoken($t, primitive_type_as_str($t), ""),
-                    })),
-                    points_to_mut: $points_to_mut
-                }
-            ),
-            is_mut: false $(|| $is_mut)?,
-        }
-    };
-}
-
-macro_rules! ttypedeclptr {
-    ($name:expr, $lit:literal, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypeanptr!(
-                $lit, $points_to_mut $(, $is_mut)?
-            )
-        }
-    };
-    ($name:expr, $t:path, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypeanptr!(
-                $t, $points_to_mut $(, $is_mut)?
-            )
-        }
-    };
-}
-
-macro_rules! tbinary {
-    ($left:literal, $left_t:path, $op:path, $right:literal, $right_t:path) => {
-        Expression::Binary {
-            left: Box::new(Expression::Literal($left_t {
-                token: ttoken($left_t, "", ""),
-                value: $left
-            })),
-            op: ttoken($op, primitive_op_as_str($op), ""),
-            right: Box::new(Expression::Literal($right_t {
-                token: ttoken($right_t, "", ""),
-                value: $right
-            })),
-        }
-    };
-    ($left:literal, $op:path, $right:literal) => {
-       Expression::Binary {
-            left: Box::new(Expression::Identifier {
-                name: tidentifier($left)
-            }),
-            operator: ttoken($op, primitive_op_as_str($op), ""),
-            right: Box::new(Expression::Identifier {
-                name: tidentifier($right),
-            })
-        }
-    };
-}
-
-mod tests {
-    use rstest::*;
-    use crate::syntax::traits::PartialTreeEq;
-    use super::*;
-
-    pub fn assert_tree_eq(
-        expected: Vec<Statement>, actual: Vec<Statement>
-    ) {
-        let ea = expected.iter().zip(actual).enumerate();
-
-        for (i, (expected_statement, actual_statement)) in ea {
-            assert!(
-                expected_statement.partial_eq(&actual_statement),
-                "{}th statement;\n{:?}\n!=\n{:?}",
-                i, expected_statement, actual_statement
-            );
+        match current_token.token_type {
+            TokenType::Identifier => self.identifier(),
+            TokenType::LeftParenthesis => self.grouping(),
+            TokenType::If => self.if_else_expression(),
+            TokenType::Fn => self.function_expression(),
+            TokenType::SelfToken => self.self_expression(),
+            _ => self.literal()
         }
     }
 
-    #[rstest]
-    #[
-        case(
-            "./resources/simple/struct_no_fields.lr",
-            vec![
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestNoFields"),
-                    fields: vec![],
-                }
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/struct_simple_fields.lr",
-            vec![
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestStructWithSimpleFields"),
-                    fields: vec![
-                        ttypedecl!("test_field_i8", TokenType::I8),
-                        ttypedecl!("test_field_i16", TokenType::I16),
-                        ttypedecl!("test_field_i32", TokenType::I32),
-                        ttypedecl!("test_field_i64", TokenType::I64),
-                        ttypedecl!("test_field_u8", TokenType::U8),
-                        ttypedecl!("test_field_u16", TokenType::U16),
-                        ttypedecl!("test_field_u32", TokenType::U32),
-                        ttypedecl!("test_field_u64", TokenType::U64),
-                        ttypedecl!("test_field_f32", TokenType::F32),
-                        ttypedecl!("test_field_f64", TokenType::F64),
-                        ttypedecl!("test_field_bool", TokenType::Bool),
-                    ]
-                }
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/struct_compound_fields.lr",
-             vec![
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TypeA"),
-                    fields: vec![
-                        ttypedecl!("type_a_field_1", TokenType::I32),
-                    ]
-                },
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestCompound"),
-                    fields: vec![
-                        ttypedecl!("type_a", "TypeA"),
-                        ttypedecl!("simple_i32", TokenType::I32),
-                    ]
-                }
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/struct_pointer_fields.lr",
-            vec![
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestStructA"),
-                    fields: vec![
-                        ttypedecl!("test_field_i8", TokenType::I8),
-                    ]
-                },
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestStructWithSimpleFields"),
-                    fields: vec![
-                        ttypedeclptr!(
-                            "test_field_i8", TokenType::I8, false
-                        ),
-                        ttypedeclptr!("test_field_i16", TokenType::I16, true),
-                        ttypedeclptr!("test_field_i32", TokenType::I32, false),
-                        TypedDeclaration {
-                            name: tidentifier("test_field_i64"),
-                            declared_type: TypeAnnotation {
-                                kind: TypeKind::Pointer(PointerAnnotation {
-                                    inner_type: Box::new(TypeKind::Pointer(
-                                        PointerAnnotation {
-                                            inner_type: Box::new(TypeKind::Pointer(
-                                                PointerAnnotation {
-                                                    inner_type: Box::new(
-                                                        TypeKind::Simple(Type {
-                                                            name: ttoken(TokenType::I64, "i64", ""),
-                                                        })
-                                                    ),
-                                                    points_to_mut: true,
-                                                }
-                                            )),
-                                            points_to_mut: false,
-                                        }
-                                    )),
-                                    points_to_mut: true,
-                                }),
-                                is_mut: false,
-                            }
-                        },
-                        ttypedeclptr!("test_field_test_struct_a", "TestStructA", true),
-                    ]
-               },
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/fn_no_args_no_return_empty.lr",
-            vec![
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test"),
-                        arguments: vec![],
-                        return_type: None,
-                        body: vec![],
-                    })
-                },
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/fn_no_args_simple_return_empty.lr",
-             vec![
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test"),
-                        arguments: vec![],
-                        return_type: Some(ttypean!(TokenType::I32)),
-                        body: vec![],
-                    })
-                },
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestA"),
-                    fields: vec![],
-                },
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test2"),
-                        arguments: vec![],
-                        return_type: Some(ttypean!("TestA")),
-                        body: vec![],
-                    })
-                },
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/fn_simple_args_simple_return_empty.lr",
-            vec![
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test"),
-                        arguments: vec![
-                            ttypedecl!("a_i32", TokenType::I32),
-                            ttypedecl!("b_i64", TokenType::I64),
-                        ],
-                        return_type: Some(ttypean!(TokenType::I32)),
-                        body: vec![],
-                    })
-                },
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestA"),
-                    fields: vec![],
-                },
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test2"),
-                        arguments: vec![
-                            ttypedecl!("a1", TokenType::I8),
-                            ttypedecl!("a2", TokenType::I16),
-                            ttypedecl!("a3", TokenType::I32),
-                            ttypedecl!("a4", TokenType::I64),
-                            ttypedecl!("a5", TokenType::U8),
-                            ttypedecl!("a6", TokenType::U16, true),
-                            ttypedecl!("a7", TokenType::U32, true),
-                            ttypedecl!("a8", TokenType::U64, true),
-                            ttypedecl!("a9", "TestA", true),
-                        ],
-                        return_type: Some(ttypean!("TestA")),
-                        body: vec![],
-                    })
-                },
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/fn_simple_args_simple_return_simple_body.lr",
-            vec![
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test"),
-                        arguments: vec![
-                            ttypedecl!("a_i32", TokenType::I32),
-                            ttypedecl!("b_i64", TokenType::I64),
-                        ],
-                        return_type: Some(ttypean!(TokenType::I32)),
-                        body: vec![
-                            Statement::ReturnStatement {
-                                token: ttoken(TokenType::Return, "return", ""),
-                                expression: Some(Box::new(tbinary!("a", TokenType::Star, "b"))),
-                            }
-                        ],
-                    })
-                },
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("TestA"),
-                    fields: vec![
-                        ttypedecl!("a", TokenType::I32),
-                    ],
-                },
-                Statement::FnStatement {
-                    token: ttoken(TokenType::Fn, "fn", ""),
-                    function: ImplFunction::Function(Function {
-                        name: tidentifier("test2"),
-                        arguments: vec![
-                            ttypedecl!("a1", TokenType::I8),
-                            ttypedecl!("a2", TokenType::I16),
-                            ttypedecl!("a3", TokenType::I32),
-                            ttypedecl!("a4", TokenType::I64),
-                            ttypedecl!("a5", TokenType::U8),
-                            ttypedecl!("a6", TokenType::U16),
-                            ttypedecl!("a7", TokenType::U32),
-                            ttypedecl!("a8", TokenType::U64),
-                            ttypedecl!("a9", "TestA"),
-                        ],
-                        return_type: Some(ttypean!("TestA")),
-                        body: vec![
-                            Statement::ExpressionStatement {
-                                expression: Box::new(Expression::Grouping {
-                                    token: ttoken(TokenType::LeftParenthesis, "(", ""),
-                                    expression: Box::new(tbinary!("a1", TokenType::Plus, "a1")),
-                                })
-                            },
-                            Statement::ReturnStatement {
-                                token: ttoken(TokenType::Return, "return", ""),
-                                expression: Some(Box::new(Expression::StructInitializer {
-                                    token: ttoken(TokenType::LeftBrace, "{", ""),
-                                    struct_name: tidentifier("TestA"),
-                                    field_initializers: vec![],
-                                })),
-                            }
-                        ],
-                    })
-                },
-            ]
-        )
-    ]
-    // #[case("./resources/simple/fn_pointer_args_pointer_return_simple_body.lr")]
-    #[
-        case(
-            "./resources/simple/impl_empty.lr",
-            vec![
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("Test"),
-                    fields: vec![],
-                },
-                Statement::ImplStatement {
-                    token: ttoken(TokenType::Impl, "impl", ""),
-                    implemented_type: tidentifier("Test"),
-                    top_level_statements: vec![],
-                    functions: vec![],
-                }
-            ]
-        )
-    ]
-    #[
-        case(
-            "./resources/simple/impl_simple.lr",
-            vec![
-                Statement::StructStatement {
-                    token: ttoken(TokenType::Struct, "struct", ""),
-                    name: tidentifier("Test"),
-                    fields: vec![],
-                },
-                Statement::ImplStatement {
-                    token: ttoken(TokenType::Impl, "impl", ""),
-                    implemented_type: tidentifier("Test"),
-                    top_level_statements: vec![],
-                    functions: vec![
-                        ImplFunction::Function(Function {
-                            name: tidentifier("function"),
-                            arguments: vec![],
-                            return_type: None,
-                            body: vec![],
-                        }),
-                        ImplFunction::Function(Function {
-                            name: tidentifier("function2"),
-                            arguments: vec![
-                                ttypedecl!("a", TokenType::I32),
-                            ],
-                            return_type: Some(ttypean!(TokenType::I64)),
-                            body: vec![
-                                Statement::ReturnStatement {
-                                    token: ttoken(TokenType::Return, "return", ""),
-                                    expression: Some(Box::new(Expression::Literal(Literal::I32 {
-                                        token: ttoken(TokenType::I32Literal, "i32", ""),
-                                        value: 5,
-                                    })))
-                                }
-                            ],
-                        }),
-                    ],
-                }
-            ]
-        )
-    ]
-    // #[case("./resources/simple/impl_methods_and_functions.lr")]
-    // #[case("./resources/simple/impl_consts_and_statics_methods_and_functions.lr")]
-    pub fn test_simple_statements(
-        #[case] source_code: &'static str,
-        #[case] expected_statements: Vec<Statement>,
-    ) {
-        let mut parser = create_test_parser(source_code);
+    #[inline(always)]
+    fn dot_before_block(&mut self) -> ParserResult<Expression> {
+        self.dot_with_op(Self::primary_before_block)
+    }
 
-        let ast = parser.parse_panic();
+    #[inline(always)]
+    fn call_before_block(&mut self) -> ParserResult<Expression> {
+        self.call_with_op(Self::dot_before_block)
+    }
 
-        assert_tree_eq(expected_statements, ast);
+    #[inline(always)]
+    fn array_slice_before_block(&mut self) -> ParserResult<Expression> {
+        self.call_with_op(Self::call_before_block)
+    }
+
+    #[inline(always)]
+    fn unary_before_block(&mut self) -> ParserResult<Expression> {
+        self.unary_with_op(Self::array_slice_before_block)
+    }
+
+    #[inline(always)]
+    fn postfix_before_block(&mut self) -> ParserResult<Expression> {
+        self.postfix_with_op(Self::unary_before_block)
+    }
+
+    #[inline(always)]
+    fn multiplicative_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::postfix_before_block,
+            TokenType::MULTIPLICATIVE_OPERATORS,
+        )
+    }
+
+    #[inline(always)]
+    fn additive_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::multiplicative_before_block,
+            TokenType::ADDITIVE_OPERATORS,
+        )
+    }
+
+    #[inline(always)]
+    fn binary_shifts_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::additive_before_block,
+            TokenType::BINARY_SHIFT_OPERATORS,
+        )
+    }
+
+    #[inline(always)]
+    fn bitwise_and_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::binary_shifts_before_block,
+            &[TokenType::BinaryAnd]
+        )
+    }
+
+    #[inline(always)]
+    fn bitwise_xor_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::bitwise_and_before_block,
+            &[TokenType::BinaryXor]
+        )
+    }
+
+    #[inline(always)]
+    fn bitwise_or_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::bitwise_xor_before_block,
+            &[TokenType::BinaryOr]
+        )
+    }
+
+    #[inline(always)]
+    fn comparisons_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::bitwise_or_before_block,
+            TokenType::COMPARISON_OPERATORS,
+        )
+    }
+
+    #[inline(always)]
+    fn logical_and_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::comparisons_before_block,
+            &[TokenType::LogicalAnd]
+        )
+    }
+
+    #[inline(always)]
+    fn logical_or_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::logical_and_before_block,
+            &[TokenType::LogicalOr]
+        )
+    }
+
+    #[inline(always)]
+    pub fn ranges_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_left_associative(
+            Self::logical_or_before_block,
+            TokenType::RANGE_OPERATORS,
+        )
+    }
+
+    #[inline(always)]
+    fn parse_assignment_before_block(&mut self) -> ParserResult<Expression> {
+        self.parse_assignment_with_op(Self::ranges_before_block)
+    }
+    
+    #[inline(always)]
+    pub fn parse_before_block_expression(&mut self) -> ParserResult<Expression> {
+        self.parse_assignment_before_block()
     }
 }

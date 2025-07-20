@@ -76,122 +76,20 @@ pub enum Literal {
     },
 }
 
-impl PartialTreeEq for Literal {
-    type Other = Literal;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        use Literal::*;
-
-        // TODO: well
-        match (self, other) {
-            (
-                I8 { token: at, value: av },
-                I8 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                I16 { token: at, value: av },
-                I16 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                I32 { token: at, value: av },
-                I32 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                I64 { token: at, value: av },
-                I64 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                U8 { token: at, value: av },
-                U8 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                U16 { token: at, value: av },
-                U16 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                U32 { token: at, value: av },
-                U32 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                U64 { token: at, value: av },
-                U64 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                F32 { token: at, value: av },
-                F32 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                F64 { token: at, value: av },
-                F64 { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                Bool { token: at, value: av },
-                Bool { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                Char { token: at, value: av },
-                Char { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                String { token: at, value: av },
-                String { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            (
-                MultilineString { token: at, value: av },
-                MultilineString { token: bt, value: bv }
-            ) => at.partial_eq(bt) && av == bv,
-            _ => false,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Type {
     pub name: Token,
 }
-
-impl PartialTreeEq for Type {
-    type Other = Type;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        self.name.partial_eq(&other.name)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct PointerAnnotation {
     pub inner_type: Box<TypeKind>,
     pub points_to_mut: bool,
 }
 
-impl PartialTreeEq for PointerAnnotation {
-    type Other = PointerAnnotation;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        self.points_to_mut == other.points_to_mut &&
-            self.inner_type.partial_eq(&other.inner_type)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum TypeKind {
     Simple(Type),
     Pointer(PointerAnnotation),
-}
-
-impl PartialTreeEq for TypeKind {
-    type Other = TypeKind;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        match (self, other) {
-            (
-                Self::Pointer(a),
-                Self::Pointer(b)
-            ) => a.partial_eq(b),
-            (Self::Simple(a), Self::Simple(b)) => a.partial_eq(b),
-            _ => false,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -201,29 +99,10 @@ pub struct TypeAnnotation {
     pub is_mut: bool,
 }
 
-impl PartialTreeEq for TypeAnnotation {
-    type Other = TypeAnnotation;
-
-    fn partial_eq(&self, other: &TypeAnnotation) -> bool {
-        self.is_mut == other.is_mut &&
-            self.kind.partial_eq(&other.kind)
-        // self.name.partial_eq(&other.name)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct TypedDeclaration {
     pub name: Token,
     pub declared_type: TypeAnnotation,
-}
-
-impl PartialTreeEq for TypedDeclaration {
-    type Other = TypedDeclaration;
-
-    fn partial_eq(&self, other: &TypedDeclaration) -> bool {
-        self.name.partial_eq(&other.name) &&
-            self.declared_type.partial_eq(&other.declared_type)
-    }
 }
 
 pub struct SizedTypedDeclaration {
@@ -272,12 +151,8 @@ pub enum Expression {
     Cast {
         token: Token,
         left: Box<Expression>,
-        target_type: Token,
-    },
-    ReinterpretCast {
-        token: Token,
-        left: Box<Expression>,
-        target_type: Type,
+        target_type: TypeAnnotation,
+        is_reinterpret_cast: bool,
     },
     Binary {
         // token: Token,
@@ -337,74 +212,6 @@ impl Expression {
 
 }
 
-impl PartialTreeEq for (Token, Expression) {
-    type Other = (Token, Expression);
-    
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        self.0.partial_eq(&other.0) && 
-            self.1.partial_eq(&other.1)
-    }
-}
-
-impl PartialTreeEq for Expression {
-    type Other = Expression;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        use Expression::*;
-
-        match (self, other) {
-            (
-                Literal(a),
-                Literal(b),
-            ) => a.partial_eq(b),
-            (
-                Grouping {
-                    token: at,
-                    expression: ae,
-                },
-                Grouping {
-                    token: bt,
-                    expression: be,
-                }
-            ) => at.partial_eq(bt) &&
-                ae.partial_eq(be),
-            (
-                Identifier { name: a },
-                Identifier { name: b },
-            ) => a.partial_eq(b),
-            (
-                Binary {
-                    left: la,
-                    operator: oa,
-                    right: ra
-                },
-                Binary {
-                    left: lb,
-                    operator: ob,
-                    right: rb
-                }
-            ) => oa.partial_eq(ob) &&
-                la.partial_eq(lb) &&
-                ra.partial_eq(rb),
-            (
-                StructInitializer {
-                    token: ta,
-                    struct_name: sna,
-                    field_initializers: fia
-                },
-                StructInitializer {
-                    token: tb,
-                    struct_name: snb,
-                    field_initializers: fib
-                }
-            ) => ta.partial_eq(tb) &&
-                sna.partial_eq(snb) &&
-                partial_eq_all(fia, fib),
-            _ => false,
-        }
-    }
-}
-
 pub struct Struct {
 
 }
@@ -417,31 +224,6 @@ pub struct Function {
     pub body: Vec<Statement>,
 }
 
-impl PartialTreeEq for Function {
-    type Other = Function;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        if !self.name.partial_eq(&other.name) {
-            return false;
-        }
-
-        if !(self.return_type.is_some() && other.return_type.is_some()) &&
-            !(self.return_type.is_none() && other.return_type.is_none()) {
-            return false;
-        }
-
-        if self.return_type.is_some() {
-            if !self.return_type.as_ref().unwrap()
-                .partial_eq(&other.return_type.as_ref().unwrap()) {
-                return false;
-            }
-        }
-
-        partial_eq_all(&self.arguments, &other.arguments) &&
-            partial_eq_all(&self.body, &other.body)
-    }
-}
-
 #[derive(Debug)]
 pub struct Method {
     pub name: Token,
@@ -452,81 +234,43 @@ pub struct Method {
     pub body: Vec<Statement>,
 }
 
-impl PartialTreeEq for Method {
-    type Other = Method;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        if !self.bound_type.partial_eq(&other.bound_type) {
-            return false;
-        }
-        if !(self.return_type.is_some() && other.return_type.is_some()) &&
-            !(self.return_type.is_none() && other.return_type.is_none()) {
-            return false;
-        }
-
-        if self.return_type.is_some() {
-            return self.return_type.as_ref().unwrap()
-                .partial_eq(&other.return_type.as_ref().unwrap())
-        }
-
-        partial_eq_all(&self.arguments, &other.arguments) &&
-            partial_eq_all(&self.body, &other.body)
-    }
-}
-
 #[derive(Debug)]
 pub enum ImplFunction {
     Function(Function),
     Method(Method),
 }
 
-impl PartialTreeEq for ImplFunction {
-    type Other = ImplFunction;
-
-    fn partial_eq(&self, other: &Self::Other) -> bool {
-        match (self, other) {
-            (
-                Self::Function(a),
-                Self::Function(b),
-            ) => a.partial_eq(b),
-            (
-                Self::Method(a),
-                Self::Method(b),
-            ) => a.partial_eq(b),
-            _ => false,
-        }
-    }
-}
-
 pub struct EnumVariant {}
 
 #[derive(Debug)]
 pub enum Statement {
-    EmptyStatement { //+
+    EmptyStatement { //++
         semicolon_token: Token,
     },
-    LetStatement {
+    LetStatement { //+-
         token: Token,
         name: Token,
         variable_type: Option<TypeAnnotation>,
         initializer: Option<Box<Expression>>,
+        is_mut: bool,
     },
-    StaticStatement { //+
+    StaticStatement { //+-
+        token: Token,
+        name: Token,
+        variable_type: TypeAnnotation,
+        initializer: Box<Expression>,
+        is_mut: bool,
+    },
+    ConstStatement { //+-
         token: Token,
         name: Token,
         variable_type: TypeAnnotation,
         initializer: Box<Expression>,
     },
-    ConstStatement { //+
-        token: Token,
-        name: Token,
-        variable_type: TypeAnnotation,
-        initializer: Box<Expression>,
-    },
-    ExpressionStatement { //+
+    ExpressionStatement { //++
         expression: Box<Expression>,
     },
-    WhileStatement { //+
+    WhileStatement { //++
         token: Token,
         condition: Box<Expression>,
         body: Vec<Statement>,
@@ -549,6 +293,7 @@ pub enum Statement {
     },
     DeferStatement {
         token: Token,
+        call_expression: Box<Expression>,
         to_closest_block: bool
     },
     StructStatement {
@@ -572,102 +317,14 @@ pub enum Statement {
         implemented_type: Token,
         top_level_statements: Vec<Statement>,
         functions: Vec<ImplFunction>,
+    },
+    IfElseStatement {
+        token: Token,
+        condition: Box<Expression>,
+        then_branch: Vec<Statement>,
+        else_branch: Option<Vec<Statement>>,
     }
-}
-
-impl PartialTreeEq for Statement {
-    type Other = Statement;
-
-    fn partial_eq(&self, other: &Statement) -> bool {
-        use Statement::*;
-
-        match (self, other) {
-            (
-                EmptyStatement { semicolon_token: a },
-                EmptyStatement { semicolon_token: b}
-            ) => a.partial_eq(b),
-            (
-                StructStatement {
-                    token: ta,
-                    name: na,
-                    fields: fa
-                },
-                StructStatement {
-                    token: tb,
-                    name: nb,
-                    fields: fb
-                }
-            ) => {
-                if !ta.partial_eq(tb) || !na.partial_eq(nb) {
-                    return false;
-                }
-
-                partial_eq_all(fa, fb)
-            },
-            (
-                FnStatement {
-                    token: ta, function: fa
-                },
-                FnStatement {
-                    token: tb, function: fb,
-                },
-            ) =>
-                ta.partial_eq(tb) && fa.partial_eq(fb),
-            (
-                ImplStatement {
-                    token: ta,
-                    implemented_type: ita,
-                    top_level_statements: tlsa,
-                    functions: fa,
-                },
-                ImplStatement {
-                    token: tb,
-                    implemented_type: itb,
-                    top_level_statements: tlsb,
-                    functions: fb,
-                }
-            ) => {
-                if !(partial_eq(ta, tb) && partial_eq(ita, itb)) {
-                    return false;
-                }
-
-                partial_eq_all(tlsa, tlsb) && partial_eq_all(fa, fb)
-            },
-            (
-                ReturnStatement {
-                    token: ta,
-                    expression: ea,
-                },
-                ReturnStatement {
-                    token: tb,
-                    expression: eb,
-                }
-            ) => {
-                if !ta.partial_eq(tb) {
-                    return false;
-                }
-
-                if !(ea.is_none() && eb.is_none() || ea.is_some() && eb.is_some()) {
-                    return false;
-                }
-
-                if ea.is_none() {
-                    return true;
-                }
-
-                ea.as_ref().unwrap().as_ref().partial_eq(eb.as_ref().unwrap().as_ref())
-            },
-            (
-                ExpressionStatement {
-                    expression: ea,
-                },
-                ExpressionStatement {
-                    expression: eb,
-                }
-            ) => ea.partial_eq(eb),
-            _ => false
-        }
-    }
+    
 }
 
 pub enum Ast {

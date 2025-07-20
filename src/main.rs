@@ -1,8 +1,3 @@
-use std::fs::read_to_string;
-use std::path::Path;
-use crate::parser::parser::Parser;
-use crate::syntax::lexer::Lexer;
-
 pub mod compiler;
 pub mod parser;
 pub mod typing;
@@ -10,10 +5,22 @@ pub mod syntax;
 pub mod utils;
 
 
+use std::fs::read_to_string;
+use std::path::Path;
+use crate::parser::parser::Parser;
+use crate::syntax::lexer::Lexer;
+use crate::syntax::traits::TreePrint;
 
+pub struct Test {
+    pub field: i32,
+}
+
+fn test() {
+    let t = Test { field: 1};
+}
 fn main() {
     let program = read_to_string(
-        Path::new("./resources/structexprfntest.lr")
+        Path::new("./resources/example.rs")
     ).unwrap();
     
     let mut lexer = Lexer::new(program);
@@ -24,9 +31,11 @@ fn main() {
     let (ast, error) = parser.parse();
     
     match error {
-        Some(e) => println!("{:?}", e),
+        Some(e) => for q in e {
+            println!("{}", q);
+        }
         None => {}
     };
     
-    println!("{:?}", ast)
+    println!("{}", ast.print_tree(0))
 }

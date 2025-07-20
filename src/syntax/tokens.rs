@@ -44,6 +44,7 @@ pub enum TokenType {
     F32,
     F64,
     Bool,
+    Char,
     V2,
     V3,
     V4,
@@ -80,10 +81,13 @@ pub enum TokenType {
     MinusEquals,
     StarEquals,
     SlashEquals,
+    PercentEquals,
     BinaryOrEquals,
     BinaryAndEquals,
     BinaryXorEquals,
     BinaryInvertEquals,
+    BinaryShiftLeftEquals,
+    BinaryShiftRightEquals,
 
     Arrow, // ->
     MatchClauseSeparator, // =>
@@ -140,6 +144,7 @@ pub enum TokenType {
     As,
     Raw,
     AsRaw, // as row <type> // reinterpret_cast
+    DeferBlock,
 }
 
 impl TokenType {
@@ -186,6 +191,26 @@ impl TokenType {
         Self::Dot,
         Self::Arrow,
     ];
+    
+    pub const POSTFIX_OPERATORS: &'static [Self] = &[
+        Self::As,
+        Self::AsRaw,
+    ];
+    
+    pub const ASSIGNMENT_OPERATORS: &'static [Self] = &[
+        Self::Equals,
+        Self::PlusEquals,
+        Self::MinusEquals,
+        Self::StarEquals,
+        Self::SlashEquals,
+        Self::PercentEquals,
+        Self::BinaryOrEquals,
+        Self::BinaryAndEquals,
+        Self::BinaryXorEquals,
+        Self::BinaryInvertEquals,
+        Self::BinaryShiftLeftEquals,
+        Self::BinaryShiftRightEquals,
+    ];
 }
 
 pub static SIMPLE_TOKENS: LazyLock<HashMap<char, TokenType>> = LazyLock::new(
@@ -200,7 +225,6 @@ pub static SIMPLE_TOKENS: LazyLock<HashMap<char, TokenType>> = LazyLock::new(
             ']' => TokenType::RightBracket,
             '(' => TokenType::LeftParenthesis,
             ')' => TokenType::RightParenthesis,
-            '!' => TokenType::LogicalNot,
         }
     }
 );
@@ -238,6 +262,12 @@ pub static DOUBLE_TOKENS: LazyLock<HashMap<char, (HashMap<char, TokenType>, Toke
                     '*' => TokenType::MultilineCommentStart,
                 },
                 TokenType::Slash,
+            ),
+            '%' => (
+                hashmap! {
+                    '=' => TokenType::PercentEquals,
+                },
+                TokenType::Percent,
             ),
             '|' => (
                 hashmap! {
@@ -311,6 +341,7 @@ pub static KEYWORDS: LazyLock<HashMap<&str, TokenType>> = LazyLock::new(
             "f32" => TokenType::F32,
             "f64" => TokenType::F64,
             "bool" => TokenType::Bool,
+            "char" => TokenType::Char,
             "v2" => TokenType::V2,
             "v3" => TokenType::V3,
             "v4" => TokenType::V4,
@@ -330,6 +361,7 @@ pub static KEYWORDS: LazyLock<HashMap<&str, TokenType>> = LazyLock::new(
             "static" => TokenType::Static,
             "const" => TokenType::Const,
             "defer" => TokenType::Defer,
+            "block" => TokenType::Block,
             "loop" => TokenType::Loop,
             "for" => TokenType::For,
             "while" => TokenType::While,
@@ -346,3 +378,11 @@ pub static KEYWORDS: LazyLock<HashMap<&str, TokenType>> = LazyLock::new(
         }
     }
 );
+
+pub static DOUBLE_KEYWORD_TOKENS: LazyLock<HashMap<TokenType, (TokenType, TokenType)>> = 
+    LazyLock::new(|| hashmap! {
+        TokenType::Enum => (TokenType::Struct, TokenType::EnumStruct),
+        TokenType::Union => (TokenType::Struct, TokenType::UnionStruct),
+        TokenType::As => (TokenType::Raw, TokenType::AsRaw),
+        TokenType::Defer => (TokenType::Block, TokenType::DeferBlock),
+    });

@@ -10,4 +10,5 @@ struct TestStructWithSimpleFields {
     test_field_f32: f32,
     test_field_f64: f64,
     test_field_bool: bool,
+    test_field_char: char,
 }

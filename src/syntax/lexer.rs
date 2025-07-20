@@ -1,4 +1,4 @@
-use crate::syntax::tokens::{TokenType, DOUBLE_TOKENS, KEYWORDS, SIMPLE_TOKENS};
+use crate::syntax::tokens::{TokenType, DOUBLE_KEYWORD_TOKENS, DOUBLE_TOKENS, KEYWORDS, SIMPLE_TOKENS};
 use crate::dev_assert;
 use maplit::{hashmap, hashset};
 use std::collections::{HashMap, HashSet};
@@ -576,7 +576,35 @@ impl Lexer {
     fn can_start_identifier(c: char) -> bool {
         c.is_ascii_alphabetic() || c == '_'
     }
-
+    
+    fn try_convert_to_double_keyword(&mut self, token: Token) -> (Token, Option<Token>) {
+        let Some(double_keyword) = DOUBLE_KEYWORD_TOKENS.get(
+            &token.token_type
+        ) else {
+            return (token, None);
+        };
+        self.skip_whitespaces();
+        
+        if !Lexer::can_start_identifier(self.peek()) {
+            return (token, None);
+        }
+        
+        self.start_position = self.current_position;
+        self.pin_position();
+        
+        let next_identifier = self.parse_identifier();
+            
+        if next_identifier.token_type != double_keyword.0 {
+            return (token, Some(next_identifier));
+        }
+        
+        let new_keyword = self.make_token(
+            double_keyword.1,
+            [token.literal, next_identifier.literal].join(" ")
+        );
+        
+        (new_keyword, None)
+    }
     pub fn next_token(&mut self) -> Option<Token> {
         if self.is_at_end() {
             return None;
@@ -594,7 +622,7 @@ impl Lexer {
             token
         } else if let Some(token) = self.parse_double_token() {
             token
-        } else if Lexer::can_start_identifier(c) {
+        } else if Lexer::can_start_identifier(c) { 
             self.parse_identifier()
         } else if c.is_ascii_digit() {
             self.parse_number()
@@ -609,77 +637,36 @@ impl Lexer {
             }
         };
 
-        // let token = match c {
-        //      '\0' => Token::new_with(|t| {
-        //          t.start_line = self.current_line;
-        //          t.start_column = self.current_column;
-        //          t.end_line = self.current_line;
-        //          t.end_column = self.current_column;
-        //      }),
-        //     ',' | '.' | ';' | '{' | '}' |
-        //     '[' | ']' | '(' | ')' | '!' |
-        //     '^' => self.parse_simple_token(c),
-        //     '+' | '-' => match c {
-        //         '+' => self.parse_double_token(
-        //             TokenType::Plus,
-        //             hashmap! {
-        //                 TokenType::Plus => TokenType::Increment
-        //             }
-        //         ),
-        //         '-' => self.parse_double_token(
-        //             TokenType::Minus,
-        //             hashmap! {
-        //                 '-' => TokenType::Decrement,
-        //                 '>' => TokenType::Arrow
-        //             }
-        //         ),
-        //         _ => unreachable!("Supposed to be only + or -")
-        //     },
-        //     '|' | '&' => match c {
-        //         '|' => self.parse_double_token(
-        //             TokenType::BinaryOr,
-        //             hashmap! {
-        //                 TokenType::BinaryOr => TokenType::LogicalOr
-        //             }
-        //         ),
-        //         '&' => self.parse_double_token(
-        //             TokenType::BinaryAnd,
-        //             hashmap! {
-        //                 TokenType::BinaryAnd => TokenType::LogicalAnd
-        //             }
-        //         ),
-        //         _ => unreachable!("Supposed to be only | or &")
-        //     },
-        //     _ => {
-        //         if c.is_ascii_alphabetic() || c == '_' {
-        //             self.parse_identifier()
-        //         } else if c.is_ascii_digit() {
-        //             self.parse_number()
-        //         } else {
-        //             panic!("Unexpected character found at {}", self.at());
-        //         }
-        //     }
-        // };
-
         Some(token)
     }
 
     pub fn lex(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
-
+        
         while !self.is_at_end() {
             self.skip_whitespaces();
             let token = self.next_token();
             
             match token {
-                Some(token) => tokens.push(token),
+                Some(token) => {
+                    let (first, second) = self.try_convert_to_double_keyword(
+                        token
+                    );
+                    tokens.push(first);
+                    
+                    if let Some(second) = second {
+                        tokens.push(second);
+                    }
+                },
                 None => {
                     break;
                 }
             }
             self.skip_whitespaces();
         }
+        
         tokens.push(self.make_token(TokenType::EOF, "".to_string()));
+      
         tokens
     }
 }
