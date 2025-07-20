@@ -148,6 +148,8 @@ impl TokenType {
         Self::Minus,
         Self::LogicalNot,
         Self::BinaryInvert,
+        Self::Increment,
+        Self::Decrement,
     ];
     
     pub const MULTIPLICATIVE_OPERATORS: &'static [Self] = &[
@@ -178,6 +180,11 @@ impl TokenType {
     pub const RANGE_OPERATORS: &'static [Self] = &[
         Self::RangeExclusive,
         Self::RangeInclusive,
+    ];
+    
+    pub const ACCESS_OPERATORS: &'static [Self] = &[
+        Self::Dot,
+        Self::Arrow,
     ];
 }
 

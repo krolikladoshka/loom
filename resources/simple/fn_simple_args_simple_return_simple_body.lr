@@ -3,7 +3,7 @@ fn test(a_i32: i32, b_i64: i64) -> i32 {
 }
 
 struct TestA {
-    a:
+    a: i32
 }
 
 fn test2(
@@ -18,7 +18,7 @@ fn test2(
     a9: TestA
 )
     ->
-        TestA 
+        TestA
 {
     (a1 + a1);
     return TestA {};

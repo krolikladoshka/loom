@@ -13,7 +13,7 @@ pub struct Variable {
 
 // #[derive(Debug, Clone)]
 // pub struct Literal {
-// 
+//
 // }
 
 #[derive(Debug, Clone)]
@@ -74,6 +74,75 @@ pub enum Literal {
         token: Token,
         value: String,
     },
+}
+
+impl PartialTreeEq for Literal {
+    type Other = Literal;
+
+    fn partial_eq(&self, other: &Self::Other) -> bool {
+        use Literal::*;
+
+        // TODO: well
+        match (self, other) {
+            (
+                I8 { token: at, value: av },
+                I8 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                I16 { token: at, value: av },
+                I16 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                I32 { token: at, value: av },
+                I32 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                I64 { token: at, value: av },
+                I64 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                U8 { token: at, value: av },
+                U8 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                U16 { token: at, value: av },
+                U16 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                U32 { token: at, value: av },
+                U32 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                U64 { token: at, value: av },
+                U64 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                F32 { token: at, value: av },
+                F32 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                F64 { token: at, value: av },
+                F64 { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                Bool { token: at, value: av },
+                Bool { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                Char { token: at, value: av },
+                Char { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                String { token: at, value: av },
+                String { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            (
+                MultilineString { token: at, value: av },
+                MultilineString { token: bt, value: bv }
+            ) => at.partial_eq(bt) && av == bv,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -175,8 +244,21 @@ pub enum Expression {
         name: Token,
     },
     MethodCall(),
-    DotAccess(),
-    Call(),
+    DotSet {},
+    ArrowSet {},
+    DotAccess {
+        object: Box<Expression>,
+        name: Token,
+    },
+    ArrowAccess {
+        pointer: Box<Expression>,
+        name: Token,
+    },
+    Call {
+        token: Token,
+        callee: Box<Expression>,
+        arguments: Vec<Expression>,
+    },
     ArraySlice {
         token: Token,
         array_expression: Box<Expression>,
@@ -243,12 +325,86 @@ pub enum Expression {
     FnExpression {
         token: Token,
         function: Function,
+    },
+    StructInitializer {
+        token: Token,
+        struct_name: Token,
+        field_initializers: Vec<(Token, Expression)>,
     }
 }
 
 impl Expression {
 
 }
+
+impl PartialTreeEq for (Token, Expression) {
+    type Other = (Token, Expression);
+    
+    fn partial_eq(&self, other: &Self::Other) -> bool {
+        self.0.partial_eq(&other.0) && 
+            self.1.partial_eq(&other.1)
+    }
+}
+
+impl PartialTreeEq for Expression {
+    type Other = Expression;
+
+    fn partial_eq(&self, other: &Self::Other) -> bool {
+        use Expression::*;
+
+        match (self, other) {
+            (
+                Literal(a),
+                Literal(b),
+            ) => a.partial_eq(b),
+            (
+                Grouping {
+                    token: at,
+                    expression: ae,
+                },
+                Grouping {
+                    token: bt,
+                    expression: be,
+                }
+            ) => at.partial_eq(bt) &&
+                ae.partial_eq(be),
+            (
+                Identifier { name: a },
+                Identifier { name: b },
+            ) => a.partial_eq(b),
+            (
+                Binary {
+                    left: la,
+                    operator: oa,
+                    right: ra
+                },
+                Binary {
+                    left: lb,
+                    operator: ob,
+                    right: rb
+                }
+            ) => oa.partial_eq(ob) &&
+                la.partial_eq(lb) &&
+                ra.partial_eq(rb),
+            (
+                StructInitializer {
+                    token: ta,
+                    struct_name: sna,
+                    field_initializers: fia
+                },
+                StructInitializer {
+                    token: tb,
+                    struct_name: snb,
+                    field_initializers: fib
+                }
+            ) => ta.partial_eq(tb) &&
+                sna.partial_eq(snb) &&
+                partial_eq_all(fia, fib),
+            _ => false,
+        }
+    }
+}
+
 pub struct Struct {
 
 }
@@ -275,10 +431,12 @@ impl PartialTreeEq for Function {
         }
 
         if self.return_type.is_some() {
-            return self.return_type.as_ref().unwrap()
-                .partial_eq(&other.return_type.as_ref().unwrap())
+            if !self.return_type.as_ref().unwrap()
+                .partial_eq(&other.return_type.as_ref().unwrap()) {
+                return false;
+            }
         }
-        
+
         partial_eq_all(&self.arguments, &other.arguments) &&
             partial_eq_all(&self.body, &other.body)
     }
@@ -443,7 +601,7 @@ impl PartialTreeEq for Statement {
                 if !ta.partial_eq(tb) || !na.partial_eq(nb) {
                     return false;
                 }
-                
+
                 partial_eq_all(fa, fb)
             },
             (
@@ -475,6 +633,38 @@ impl PartialTreeEq for Statement {
 
                 partial_eq_all(tlsa, tlsb) && partial_eq_all(fa, fb)
             },
+            (
+                ReturnStatement {
+                    token: ta,
+                    expression: ea,
+                },
+                ReturnStatement {
+                    token: tb,
+                    expression: eb,
+                }
+            ) => {
+                if !ta.partial_eq(tb) {
+                    return false;
+                }
+
+                if !(ea.is_none() && eb.is_none() || ea.is_some() && eb.is_some()) {
+                    return false;
+                }
+
+                if ea.is_none() {
+                    return true;
+                }
+
+                ea.as_ref().unwrap().as_ref().partial_eq(eb.as_ref().unwrap().as_ref())
+            },
+            (
+                ExpressionStatement {
+                    expression: ea,
+                },
+                ExpressionStatement {
+                    expression: eb,
+                }
+            ) => ea.partial_eq(eb),
             _ => false
         }
     }

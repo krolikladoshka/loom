@@ -1,12 +1,17 @@
+use std::collections::HashMap;
 use std::env;
 use std::fmt::Display;
 use std::fs::read_to_string;
 use std::path::Path;
 use std::str::FromStr;
-use crate::syntax::ast::{Literal, Expression, Function, ImplFunction, Method, Statement, TypeAnnotation, TypeKind, TypedDeclaration, Type, PointerAnnotation, Identifier};
+use crate::syntax::ast::{
+    Literal, Expression, Function,
+    ImplFunction, Method, Statement,
+    TypeAnnotation, TypeKind, TypedDeclaration,
+    Type, PointerAnnotation, Identifier
+};
 use crate::syntax::lexer::{Lexer, Token};
 use crate::syntax::tokens::TokenType;
-
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
@@ -103,6 +108,21 @@ impl Display for LiteralParseError {
 }
 
 #[derive(Debug, Clone)]
+pub struct DuplicatedStructInitializerFieldError {
+    pub struct_name: Token,
+    pub field_name: Token,
+}
+
+impl Display for DuplicatedStructInitializerFieldError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f, "duplicated struct initializer field {} for {}",
+            self.field_name, self.struct_name
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum ParserError {
     EmptyStream,
     UnrecognizedToken(Token),
@@ -112,6 +132,7 @@ pub enum ParserError {
     UnexpectedStatement(Token),
     TypeAnnotationRequired(TypeAnnotationRequiredError),
     InitializerRequired(InitializerRequiredError),
+    DuplicatedStructInitializerField(DuplicatedStructInitializerFieldError),
     LiteralParseError(LiteralParseError),
     UnexpectedPrimaryExpression(Token),
     UnterminatedArraySlice(Token),
@@ -136,6 +157,8 @@ impl Display for ParserError {
                 write!(f, "{}", t),
             Self::InitializerRequired(t) =>
                 write!(f, "{}", t),
+            Self::DuplicatedStructInitializerField(d) =>
+                write!(f, "{}", d),
             Self::LiteralParseError(err) =>
                 write!(f, "{}", err),
             Self::UnexpectedPrimaryExpression(t) =>
@@ -181,6 +204,12 @@ impl ParserError {
         Self::LiteralParseError(LiteralParseError {
             token,
             to,
+        })
+    }
+
+    pub fn duplicated_struct_initializer_field(struct_name: Token, field_name: Token) -> Self {
+        Self::DuplicatedStructInitializerField(DuplicatedStructInitializerFieldError {
+            struct_name, field_name
         })
     }
 }
@@ -241,10 +270,12 @@ impl Parser {
             }
         }
     }
-    
+
     fn advance_and_skip_next_comments(&mut self) -> Option<Token> {
-        self.advance()?;
-        self.advance_skipping_comments()
+        let token = self.advance()?;
+        self.advance_skipping_comments();
+
+        Some(token)
     }
 
     #[inline(always)]
@@ -1499,6 +1530,78 @@ impl Parser {
 
         Ok(Expression::Literal(literal))
     }
+
+    fn initializer_for(&mut self, struct_name: Token) -> ParserResult<Expression> {
+        let token = self.require(
+            TokenType::LeftBrace,
+            "opening '{' in initializer"
+        )?;
+
+        let mut field_initializers = HashMap::new();
+        loop {
+            if let Some(_) = self.match_current(
+                TokenType::RightBrace,
+                "closing '}' in initializer"
+            )? {
+                break;
+            }
+            let field_name = self.require(
+                TokenType::Identifier,
+                "field identifier in initializer"
+            )?;
+
+            if field_initializers.contains_key(&field_name.literal) {
+                return Err(self.wrap_error(ParserError::duplicated_struct_initializer_field(
+                    struct_name,
+                    field_name
+                )));
+            }
+
+            self.advance_skipping_comments();
+            self.require(
+                TokenType::Colon,
+                "expected ':' after field in initializer"
+            )?;
+
+            let initializer = self.parse_expression()?;
+            field_initializers.insert(
+                field_name.literal.clone(), (field_name, initializer)
+            );
+
+            if self.match_current(
+                TokenType::RightBrace, "',' or '}' in initializer"
+            )?.is_none() {
+                break;
+            }
+        }
+
+        self.require(
+            TokenType::RightBrace,
+            "closing '}' after initializer"
+        )?;
+
+        Ok(Expression::StructInitializer {
+            token,
+            struct_name,
+            field_initializers: field_initializers.into_values().collect()
+        })
+    }
+
+    fn identifier_or_initializer(&mut self) -> ParserResult<Expression> {
+        let name = self.require(
+            TokenType::Identifier, "primary identifier"
+        )?;
+
+        if let Some(_) = self.match_current(
+            TokenType::LeftBrace,
+            "struct initializer"
+        )?
+        {
+            self.initializer_for(name)
+        } else {
+            Ok(Expression::Identifier { name })
+        }
+    }
     fn primary(&mut self) -> ParserResult<Expression> {
         self.advance_skipping_comments();
 
@@ -1511,8 +1614,8 @@ impl Parser {
         };
 
         match current_token.token_type {
-            TokenType::Identifier => self.identifier(),
-            TokenType::RightParenthesis => self.grouping(),
+            TokenType::Identifier => self.identifier_or_initializer(),
+            TokenType::LeftParenthesis => self.grouping(),
             TokenType::If => self.if_else_expression(),
             TokenType::Fn => self.function_expression(),
             TokenType::SelfToken => self.self_expression(),
@@ -1521,11 +1624,85 @@ impl Parser {
     }
 
     fn dot(&mut self) -> ParserResult<Expression> {
-        self.primary()
+        let mut expr = self.primary()?;
+
+        loop {
+            let Some(access_operator) = self.match_tokens(
+                TokenType::ACCESS_OPERATORS,
+                "`.` or `->`"
+            )? else {
+                return Ok(expr);
+            };
+
+            self.advance_and_skip_next_comments();
+            let identifier = self.require(
+                TokenType::Identifier,
+                "expected an identifier after `.` or `->`"
+            )?;
+
+            match access_operator.token_type {
+                TokenType::Dot => {
+                    expr = Expression::DotAccess {
+                        object: Box::new(expr),
+                        name: identifier,
+                    }
+                },
+                TokenType::Arrow => {
+                    expr = Expression::ArrowAccess {
+                        pointer: Box::new(expr),
+                        name: identifier,
+                    }
+                },
+                _ => return Err(self.wrap_error(ParserError::error(
+                    "unreachable parser state in . or -> parsing".to_string(),
+                    access_operator.start_line,
+                    access_operator.start_column,
+                    self.current_position
+                )))
+            }
+        }
     }
 
+    // TODO: basically the same as array slice `higher_precedence` `OP_TOKEN` `expr`* `CLOSE_TOKEN`
     fn call(&mut self) -> ParserResult<Expression> {
-        self.dot()
+        let mut expr = self.dot()?;
+
+        loop {
+            let Some(open_token) = self.match_current(
+                TokenType::LeftParenthesis, "function call"
+            )? else {
+                return Ok(expr);
+            };
+
+            self.advance_and_skip_next_comments();
+
+            let mut call_arguments = vec![];
+            loop {
+                if let Some(_) = self.match_current(
+                    TokenType::RightParenthesis, "function call"
+                )?
+                {
+                    break;
+                };
+
+                let argument = self.parse_expression()?;
+                call_arguments.push(argument);
+
+                if self.match_current(TokenType::Comma, "next parameter")?.is_none() {
+                    break;
+                }
+                self.advance_and_skip_next_comments();
+            }
+
+            self.require(
+                TokenType::RightParenthesis, "function call end"
+            )?;
+            expr = Expression::Call {
+                token: open_token,
+                callee: Box::new(expr),
+                arguments: call_arguments,
+            };
+        }
     }
 
     fn array_slice(&mut self) -> ParserResult<Expression> {
@@ -1568,7 +1745,8 @@ impl Parser {
         };
 
         // todo: maybe error: parse array slice
-        let expression = self.parse_expression()?;
+        // let expression = self.parse_expression()?;
+        let expression = self.array_slice()?;
 
         Ok(Expression::Unary {
             token: token.clone(),
@@ -1591,6 +1769,8 @@ impl Parser {
 
         while let Some(operator) = self.match_tokens(operators, "binary expression")?
         {
+            self.advance_and_skip_next_comments();
+
             let right = parse_operand(self)?;
             expr = Expression::Binary {
                 left: Box::new(expr),
@@ -1745,6 +1925,17 @@ fn primitive_type_as_str(token_type: TokenType) -> &'static str {
     }
 }
 
+fn primitive_op_as_str(token_type: TokenType) -> &'static str {
+    match token_type {
+        TokenType::Star => "*",
+        TokenType::Plus => "+",
+        TokenType::Minus => "-",
+        TokenType::Slash => "/",
+        TokenType::Percent => "%",
+        _ => panic!("can only stringify primitive operators")
+    }
+}
+
 macro_rules! ttypean {
     ($lit:literal $(, $is_mut:expr)?) => {
         TypeAnnotation {
@@ -1825,6 +2016,33 @@ macro_rules! ttypedeclptr {
             declared_type: ttypeanptr!(
                 $t, $points_to_mut $(, $is_mut)?
             )
+        }
+    };
+}
+
+macro_rules! tbinary {
+    ($left:literal, $left_t:path, $op:path, $right:literal, $right_t:path) => {
+        Expression::Binary {
+            left: Box::new(Expression::Literal($left_t {
+                token: ttoken($left_t, "", ""),
+                value: $left
+            })),
+            op: ttoken($op, primitive_op_as_str($op), ""),
+            right: Box::new(Expression::Literal($right_t {
+                token: ttoken($right_t, "", ""),
+                value: $right
+            })),
+        }
+    };
+    ($left:literal, $op:path, $right:literal) => {
+       Expression::Binary {
+            left: Box::new(Expression::Identifier {
+                name: tidentifier($left)
+            }),
+            operator: ttoken($op, primitive_op_as_str($op), ""),
+            right: Box::new(Expression::Identifier {
+                name: tidentifier($right),
+            })
         }
     };
 }
@@ -2062,10 +2280,7 @@ mod tests {
                         body: vec![
                             Statement::ReturnStatement {
                                 token: ttoken(TokenType::Return, "return", ""),
-                                expression: Some(Box::new(Expression::Literal(Literal::I32 {
-                                    token: ttoken(TokenType::I32Literal, "i32", ""),
-                                    value: 5,
-                                })))
+                                expression: Some(Box::new(tbinary!("a", TokenType::Star, "b"))),
                             }
                         ],
                     })
@@ -2073,7 +2288,9 @@ mod tests {
                 Statement::StructStatement {
                     token: ttoken(TokenType::Struct, "struct", ""),
                     name: tidentifier("TestA"),
-                    fields: vec![],
+                    fields: vec![
+                        ttypedecl!("a", TokenType::I32),
+                    ],
                 },
                 Statement::FnStatement {
                     token: ttoken(TokenType::Fn, "fn", ""),
@@ -2085,13 +2302,28 @@ mod tests {
                             ttypedecl!("a3", TokenType::I32),
                             ttypedecl!("a4", TokenType::I64),
                             ttypedecl!("a5", TokenType::U8),
-                            ttypedecl!("a6", TokenType::U16, true),
-                            ttypedecl!("a7", TokenType::U32, true),
-                            ttypedecl!("a8", TokenType::U64, true),
-                            ttypedecl!("a9", "TestA", true),
+                            ttypedecl!("a6", TokenType::U16),
+                            ttypedecl!("a7", TokenType::U32),
+                            ttypedecl!("a8", TokenType::U64),
+                            ttypedecl!("a9", "TestA"),
                         ],
                         return_type: Some(ttypean!("TestA")),
-                        body: vec![],
+                        body: vec![
+                            Statement::ExpressionStatement {
+                                expression: Box::new(Expression::Grouping {
+                                    token: ttoken(TokenType::LeftParenthesis, "(", ""),
+                                    expression: Box::new(tbinary!("a1", TokenType::Plus, "a1")),
+                                })
+                            },
+                            Statement::ReturnStatement {
+                                token: ttoken(TokenType::Return, "return", ""),
+                                expression: Some(Box::new(Expression::StructInitializer {
+                                    token: ttoken(TokenType::LeftBrace, "{", ""),
+                                    struct_name: tidentifier("TestA"),
+                                    field_initializers: vec![],
+                                })),
+                            }
+                        ],
                     })
                 },
             ]
