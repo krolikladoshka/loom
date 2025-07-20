@@ -143,6 +143,7 @@ pub enum ParserError {
     UnterminatedArraySlice(Token),
     UnexpectedArgument(UnexpectedArgumentError),
     ParseError(ParseError),
+    Eof,
     CompoundError(Vec<ParserError>)
 }
 
@@ -174,6 +175,7 @@ impl Display for ParserError {
             Self::UnexpectedArgument(t) =>
                 write!(f, "{}", t),
             Self::ParseError(t) => write!(f, "Uncategorized error: {}", t),
+            Self::Eof => write!(f, "EOF"),
             Self::CompoundError(errors) => {
                 // let mut messages = vec![];
                 for (i, error) in errors.iter().enumerate() {

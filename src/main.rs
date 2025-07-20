@@ -7,6 +7,7 @@ pub mod utils;
 
 use std::fs::read_to_string;
 use std::path::Path;
+use crate::compiler::c_transpiler::CTranspiler;
 use crate::parser::parser::Parser;
 use crate::syntax::lexer::Lexer;
 use crate::syntax::traits::TreePrint;
@@ -28,14 +29,20 @@ fn main() {
     let tokens = lexer.lex();
     tokens.iter().for_each(|t| println!("{:?}", t));
     let mut parser = Parser::new(tokens);
-    let (ast, error) = parser.parse();
+    // let (ast, error) = parser.parse();
+    // 
+    // match error {
+    //     Some(e) => for q in e {
+    //         println!("{}", q);
+    //     }
+    //     None => {}
+    // };
+    // 
+    // println!("{}", ast.print_tree(0))
     
-    match error {
-        Some(e) => for q in e {
-            println!("{}", q);
-        }
-        None => {}
-    };
+    let mut transpiler = CTranspiler::new(&mut parser); 
     
-    println!("{}", ast.print_tree(0))
+    let result = transpiler.transpile();
+    
+    println!("{}", result);
 }

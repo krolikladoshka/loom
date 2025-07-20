@@ -182,21 +182,31 @@ impl Parser {
         result
     }
 
+    pub fn parse_next(&mut self) -> ParserResult<Statement> {
+        if self.is_at_end() {
+            return Err(ParserError::Eof);
+        }
+
+        self.advance_skipping_comments();
+
+        let result = self.top_level_statement();
+        
+        self.advance_skipping_comments();
+        
+        result
+    }
+    
     pub fn parse(&mut self) -> (Vec<Statement>, Option<Vec<ParserError>>) {
         let mut ast = vec![];
         let mut errors = vec![];
 
         loop {
-            if self.is_at_end() {
-                break;
-            }
-
-            self.advance_skipping_comments();
-
-            let parse_result = self.top_level_statement();
-            match parse_result {
+            match self.parse_next() {
                 Ok(statement) => ast.push(statement),
                 Err(err) => {
+                    if let ParserError::Eof = err {
+                        break;
+                    }
                     errors.push(err);
                     self.advance_until_next_statement();
                     self.empty_statement();
