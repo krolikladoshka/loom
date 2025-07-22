@@ -173,27 +173,27 @@ macro_rules! ttypedeclptr {
 #[macro_export]
 macro_rules! tbinary {
     ($left:literal, $left_t:path, $op:path, $right:literal, $right_t:path) => {
-        Expression::Binary {
-            left: Box::new(Expression::Literal($left_t {
+        Expression::new_binary(
+            Expression::Literal($left_t {
                 token: ttoken($left_t, "", ""),
                 value: $left
-            })),
-            op: ttoken($op, primitive_op_as_str($op), ""),
-            right: Box::new(Expression::Literal($right_t {
+            }),
+            ttoken($op, primitive_op_as_str($op), ""),
+            Expression::Literal($right_t {
                 token: ttoken($right_t, "", ""),
                 value: $right
-            })),
-        }
+            }),
+        )
     };
     ($left:literal, $op:path, $right:literal) => {
-       Expression::Binary {
-            left: Box::new(Expression::Identifier {
-                name: tidentifier($left)
-            }),
-            operator: ttoken($op, primitive_op_as_str($op), ""),
-            right: Box::new(Expression::Identifier {
-                name: tidentifier($right),
-            })
-        }
+       Expression::new_binary(
+            Expression::new_identifier(
+                tidentifier($left)
+            ),
+            ttoken($op, primitive_op_as_str($op), ""),
+            Expression::new_identifier(
+                tidentifier($right),
+            )
+        )
     };
 }

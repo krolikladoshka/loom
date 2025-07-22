@@ -1,10 +1,5 @@
 use crate::parser::errors::ParserError;
-use crate::syntax::ast::{
-    Expression, Function, ImplFunction,
-    Literal, Method, PointerAnnotation,
-    Statement, Type, TypeAnnotation,
-    TypeKind, TypedDeclaration
-};
+use crate::syntax::ast::{Expression, FnStatement, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
 use crate::syntax::lexer::Token;
 use crate::syntax::tokens::TokenType;
 use std::collections::HashMap;
@@ -362,11 +357,7 @@ impl Parser {
         match expr {
             Expression::Call {..} | Expression::MethodCall {..} |
             Expression::Identifier {..} => Ok(
-                Statement::DeferStatement {
-                    token,
-                    call_expression: Box::new(expr),
-                    to_closest_block: false
-                }
+                Statement::new_defer(token, expr, false)
             ),
             _ => Err(self.wrap_error(ParserError::defer_non_callable_argument(
                 token
@@ -384,11 +375,7 @@ impl Parser {
         match expr {
             Expression::Call {..} | Expression::MethodCall {..} |
             Expression::Identifier {..} => Ok(
-                Statement::DeferStatement {
-                    token,
-                    call_expression: Box::new(expr),
-                    to_closest_block: true
-                }
+                Statement::new_defer(token, expr, true)
             ),
             _ => Err(self.wrap_error(ParserError::defer_non_callable_argument(
                 token
@@ -594,13 +581,13 @@ impl Parser {
         let result = self.common_variable_declaration(
             false,
             |identifier, type_annotation, initializer|
-                Ok(Statement::LetStatement {
-                    token: let_token,
-                    name: identifier,
-                    variable_type: type_annotation,
+                Ok(Statement::new_let(
+                    let_token,
+                    identifier,
+                    type_annotation,
                     initializer,
-                    is_mut,
-                })
+                    is_mut
+                ))
         )?;
 
         self.require(
@@ -643,13 +630,13 @@ impl Parser {
                     ))
                 };
 
-                Ok(Statement::StaticStatement {
+                Ok(Statement::new_static(
                     token,
-                    name: identifier,
-                    variable_type: annotation,
+                    identifier,
+                    annotation,
                     initializer,
                     is_mut
-                })
+                ))
             }
         )?;
 
@@ -685,12 +672,12 @@ impl Parser {
                     ))
                 };
 
-                Ok(Statement::ConstStatement {
+                Ok(Statement::new_const(
                     token,
-                    name: identifier,
-                    variable_type: annotation,
+                    identifier,
+                    annotation,
                     initializer,
-                })
+                ))
             }
         )?;
 
@@ -854,10 +841,7 @@ impl Parser {
         };
 
 
-        Ok(Statement::FnStatement {
-            token,
-            function
-        })
+        Ok(Statement::new_fn(token, function))
     }
 
     fn function_statement(&mut self) -> ParserResult<Statement> {
@@ -903,10 +887,7 @@ impl Parser {
             body
         });
 
-        Ok(Statement::FnStatement {
-            token,
-            function
-        })
+        Ok(Statement::new_fn(token, function))
     }
 
     fn struct_statement(&mut self) -> ParserResult<Statement> {
@@ -987,11 +968,7 @@ impl Parser {
         )?;
 
         // TODO: pub fields
-        Ok(Statement::StructStatement {
-            token,
-            name,
-            fields,
-        })
+        Ok(Statement::new_struct(token, name, fields))
     }
 
     fn impl_statement(&mut self) -> ParserResult<Statement> {
@@ -1028,9 +1005,9 @@ impl Parser {
             match statement {
                 Statement::StaticStatement { .. } | Statement::ConstStatement { .. } =>
                     top_level_statements.push(statement),
-                Statement::FnStatement {
+                Statement::FnStatement(FnStatement {
                     function, ..
-                } => impl_statements.push(function),
+                }) => impl_statements.push(function),
                 _ => unreachable!(
                     "Unexpected statement while parsing impl statement"
                 ),
@@ -1042,12 +1019,12 @@ impl Parser {
             "expected '}' after impl definition"
         )?;
 
-        Ok(Statement::ImplStatement {
+        Ok(Statement::new_impl(
             token,
-            implemented_type: name,
+            name,
             top_level_statements,
-            functions: impl_statements,
-        })
+            impl_statements,
+        ))
     }
 
     pub fn expression_statement(&mut self) -> ParserResult<Statement> {
@@ -1057,9 +1034,7 @@ impl Parser {
             TokenType::Semicolon, "expect ';' after expression",
         )?;
 
-        let statement = Statement::ExpressionStatement {
-            expression: Box::new(expression)
-        };
+        let statement = Statement::new_expression(expression);
 
         Ok(statement)
     }
@@ -1095,12 +1070,12 @@ impl Parser {
             None
         };
 
-        Ok(Statement::IfElseStatement {
-            token: if_token,
-            condition: Box::new(condition),
-            then_branch: statements,
-            else_branch: else_block,
-        })
+        Ok(Statement::new_if_else(
+            if_token,
+            condition,
+            statements,
+            else_block,
+        ))
     }
     fn loop_statement(&mut self) -> ParserResult<Statement> {
         let token = self.require(
@@ -1108,14 +1083,14 @@ impl Parser {
         )?;
         let statements = self.parse_block_of_statements()?;
 
-        Ok(Statement::WhileStatement {
-            token: token.clone(),
-            condition: Box::new(Expression::Literal(Literal::Bool {
+        Ok(Statement::new_while(
+            token.clone(),
+            Expression::Literal(Literal::Bool {
                 token, // TODO: wlel
                 value: true
-            })),
-            body: statements
-        })
+            }),
+            statements
+        ))
     }
 
     fn while_statement(&mut self) -> ParserResult<Statement> {
@@ -1126,11 +1101,11 @@ impl Parser {
         let condition = self.parse_before_block_expression()?;
         let statements = self.parse_block_of_statements()?;
 
-        let while_statement = Statement::WhileStatement {
+        let while_statement = Statement::new_while(
             token,
-            condition: Box::new(condition),
-            body: statements,
-        };
+            condition,
+            statements,
+        );
 
         Ok(while_statement)
     }
@@ -1152,15 +1127,12 @@ impl Parser {
             self.require(TokenType::Semicolon, "")?;
 
 
-            Ok(Statement::BreakStatement {
+            Ok(Statement::new_break(
                 token,
-                loop_key: Some(next_token.clone())
-            })
+                Some(next_token.clone())
+            ))
         } else if next_token.token_type == TokenType::Semicolon {
-            Ok(Statement::BreakStatement {
-                token,
-                loop_key: None
-            })
+            Ok(Statement::new_break(token, None))
         } else {
             Err(
                 self.wrap_error(ParserError::unexpected_token(
@@ -1187,15 +1159,12 @@ impl Parser {
             self.require(TokenType::Semicolon, "")?;
 
 
-            Ok(Statement::BreakStatement {
+            Ok(Statement::new_break(
                 token,
-                loop_key: Some(next_token.clone())
-            })
+                Some(next_token.clone())
+            ))
         } else if next_token.token_type == TokenType::Semicolon {
-            Ok(Statement::BreakStatement {
-                token,
-                loop_key: None
-            })
+            Ok(Statement::new_break(token, None))
         } else {
             Err(
                 self.wrap_error(ParserError::unexpected_token(
@@ -1230,10 +1199,7 @@ impl Parser {
             Some(Box::new(expression))
         };
 
-        Ok(Statement::ReturnStatement {
-            token,
-            expression: ret_expr,
-        })
+        Ok(Statement::new_return(token, ret_expr))
     }
 
     fn parse_block_of_statements(&mut self) -> ParserResult<Vec<Statement>> {
@@ -1288,9 +1254,7 @@ impl Parser {
                 } else if  next_token.token_type == TokenType::Semicolon {
                     self.advance();
 
-                    statements.push(Statement::ExpressionStatement {
-                        expression: Box::new(expression)
-                    });
+                    statements.push(Statement::new_expression(expression));
 
                     continue
                 } else {
@@ -1308,11 +1272,11 @@ impl Parser {
             "Expected '}' at the end of block"
         )?;
 
-        Ok(Expression::Block {
+        Ok(Expression::new_block(
             token,
             statements,
             return_expression,
-        })
+        ))
     }
 
     fn grouping(&mut self) -> ParserResult<Expression> {
@@ -1326,10 +1290,7 @@ impl Parser {
             "expected ')' in grouping expression"
         )?;
 
-        Ok(Expression::Grouping {
-            token,
-            expression: Box::new(expression),
-        })
+        Ok(Expression::new_grouping(token, expression))
     }
 
     fn identifier(&mut self) -> ParserResult<Expression> {
@@ -1337,9 +1298,7 @@ impl Parser {
             TokenType::Identifier, "primary identifier"
         )?;
 
-        Ok(Expression::Identifier {
-            name
-        })
+        Ok(Expression::new_identifier(name))
     }
 
     fn self_expression(&mut self) -> ParserResult<Expression> {
@@ -1347,9 +1306,7 @@ impl Parser {
             TokenType::SelfToken, "self primarity identifier"
         )?;
 
-        Ok(Expression::SelfExpression {
-            token: self_token,
-        })
+        Ok(Expression::new_self(self_token))
     }
 
     fn function_expression(&mut self) -> ParserResult<Expression> {
@@ -1395,10 +1352,7 @@ impl Parser {
             body
         };
 
-        Ok(Expression::FnExpression {
-            token,
-            function
-        })
+        Ok(Expression::new_fn(token, function))
     }
 
     fn if_else_expression(&mut self) -> ParserResult<Expression> {
@@ -1519,11 +1473,11 @@ impl Parser {
             "closing '}' after initializer"
         )?;
 
-        Ok(Expression::StructInitializer {
+        Ok(Expression::new_struct_initializer( 
             token,
             struct_name,
-            field_initializers: field_initializers.into_values().collect()
-        })
+            field_initializers.into_values().collect()
+        ))
     }
 
     fn identifier_or_initializer(&mut self) -> ParserResult<Expression> {
@@ -1538,7 +1492,7 @@ impl Parser {
         {
             self.initializer_for(name)
         } else {
-            Ok(Expression::Identifier { name })
+            Ok(Expression::new_identifier(name))
         }
     }
 
@@ -1559,12 +1513,12 @@ impl Parser {
 
         let target_type = self.type_annotation(false)?;
 
-        Ok(Expression::Cast {
-            token: operator_token,
-            left: Box::new(expr),
+        Ok(Expression::new_cast(
+            operator_token,
+            expr,
             target_type,
-            is_reinterpret_cast: is_raw,
-        })
+            is_raw,
+        ))
     }
 
     fn dot_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
@@ -1589,16 +1543,10 @@ impl Parser {
 
             match access_operator.token_type {
                 TokenType::Dot => {
-                    expr = Expression::DotAccess {
-                        object: Box::new(expr),
-                        name: identifier,
-                    }
+                    expr = Expression::new_dot_access(expr, identifier);
                 },
                 TokenType::Arrow => {
-                    expr = Expression::ArrowAccess {
-                        pointer: Box::new(expr),
-                        name: identifier,
-                    }
+                    expr = Expression::new_arrow_access(expr, identifier);
                 },
                 _ => return Err(self.wrap_error(ParserError::error(
                     "unreachable parser state in . or -> parsing".to_string(),
@@ -1647,11 +1595,11 @@ impl Parser {
             self.require(
                 TokenType::RightParenthesis, "function call end"
             )?;
-            expr = Expression::Call {
-                token: open_token,
-                callee: Box::new(expr),
-                arguments: call_arguments,
-            };
+            expr = Expression::new_call(
+                open_token,
+                expr,
+                call_arguments,
+            );
         }
     }
 
@@ -1682,11 +1630,11 @@ impl Parser {
 
             self.advance_and_skip_next_comments();
 
-            expr = Expression::ArraySlice {
-                token: open_token,
-                array_expression: Box::new(expr),
-                slice_expression: Box::new(slice_expression),
-            };
+            expr = Expression::new_array_slice(
+                open_token,
+                expr,
+                slice_expression,
+            );
         }
     }
 
@@ -1705,11 +1653,11 @@ impl Parser {
         // let expression = self.parse_expression()?;
         let expression = operand(self)?;
 
-        Ok(Expression::Unary {
-            token: token.clone(),
-            operator: token,
-            expression: Box::new(expression)
-        })
+        Ok(Expression::new_unary(
+            token.clone(),
+            token,
+            expression
+        ))
     }
 
     fn postfix_with_op<Op>(&mut self, operand: Op) -> ParserResult<Expression>
@@ -1747,11 +1695,11 @@ impl Parser {
             self.advance_and_skip_next_comments();
 
             let right = parse_operand(self)?;
-            expr = Expression::Binary {
-                left: Box::new(expr),
+            expr = Expression::new_binary(
+                expr,
                 operator,
-                right: Box::new(right)
-            };
+                right
+            );
         }
 
         Ok(expr)
@@ -1773,21 +1721,21 @@ impl Parser {
             let right = self.parse_assignment_with_op(operand)?;
 
             let expression = match assignment_operator.token_type {
-                TokenType::Equals => Expression::Assignment {
-                    token: assignment_operator,
-                    lhs: Box::new(left),
-                    rhs: Box::new(right),
-                },
+                TokenType::Equals => Expression::new_assignment(
+                    assignment_operator,
+                    left,
+                    right,
+                ),
                 TokenType::PlusEquals | TokenType::MinusEquals |
                 TokenType::StarEquals | TokenType::SlashEquals |
                 TokenType::PercentEquals | TokenType::BinaryInvertEquals |
                 TokenType::BinaryOrEquals | TokenType::BinaryXorEquals |
-                TokenType::BinaryAndEquals => Expression::InplaceAssignment {
-                    token: assignment_operator.clone(),
-                    lhs: Box::new(left),
-                    operator: assignment_operator,
-                    rhs: Box::new(right),
-                },
+                TokenType::BinaryAndEquals => Expression::new_inplace_assignment(
+                    assignment_operator.clone(),
+                    left,
+                    assignment_operator,
+                    right,
+                ),
                 _ => return Err(self.wrap_error(ParserError::unexpected_token(
                     assignment_operator,
                     TokenType::Equals,

@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use crate::syntax::ast::{Expression, Function, Identifier, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
+use crate::syntax::ast::{Binary, Cast, Expression, ExpressionStatement, FnStatement, Function, Grouping, Identifier, ImplFunction, ImplStatement, Literal, Method, PointerAnnotation, ReturnStatement, Statement, StructInitializer, StructStatement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
 // use crate::syntax::ast::Expression::{Binary, Cast, Grouping, Identifier, StructInitializer};
 // use crate::syntax::ast::Literal::{Bool, Char, MultilineString, F32, F64, I16, I32, I64, I8, U16, U32, U64, U8};
 // use crate::syntax::ast::Statement::{EmptyStatement, ExpressionStatement, FnStatement, ImplStatement, ReturnStatement, StructStatement};
@@ -171,6 +171,63 @@ impl PartialTreeEq for (Token, Expression) {
     }
 }
 
+impl PartialTreeEq for Grouping {
+    type Other = Grouping;
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.token.partial_eq(&other.token) &&
+            self.expression.partial_eq(&other.expression)
+    }
+}
+
+impl PartialTreeEq for Identifier {
+    type Other = Identifier;
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.name.partial_eq(&other.name)
+    }
+}
+
+impl PartialTreeEq for Binary {
+    type Other = Binary;
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.operator.partial_eq(&other.operator) &&
+            self.left.partial_eq(&other.left) &&
+            self.right.partial_eq(&other.right)
+    }
+}
+
+impl PartialTreeEq for Vec<(Token, Expression)> {
+    type Other = Vec<(Token, Expression)>;
+    fn partial_eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        self.iter()
+            .zip(other.iter())
+            .all(|(a, b)| partial_eq(a, b))
+    }
+}
+
+impl PartialTreeEq for StructInitializer {
+    type Other = StructInitializer;
+
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.token.partial_eq(&other.token) &&
+            self.struct_name.partial_eq(&other.struct_name) &&
+            self.field_initializers.partial_eq(&other.field_initializers)
+    }
+}
+
+impl PartialTreeEq for Cast {
+    type Other = Cast;
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.is_reinterpret_cast == other.is_reinterpret_cast &&
+            self.token.partial_eq(&other.token) &&
+            self.target_type.partial_eq(&other.target_type) &&
+            self.left.partial_eq(&other.left)
+    }
+}
+
 impl PartialTreeEq for Expression {
     type Other = Expression;
 
@@ -180,67 +237,27 @@ impl PartialTreeEq for Expression {
             (
                 Literal(a),
                 Literal(b),
-            ) => a.partial_eq(b),
+            ) => partial_eq(a, b),
             (
-                Grouping {
-                    token: at,
-                    expression: ae,
-                },
-                Grouping {
-                    token: bt,
-                    expression: be,
-                }
-            ) => at.partial_eq(bt) &&
-                ae.partial_eq(be),
+                Grouping(a),
+                Grouping(b)
+            ) => partial_eq(a, b),
             (
-                Identifier { name: a },
-                Identifier { name: b },
-            ) => a.partial_eq(b),
+                Identifier(a),
+                Identifier(b),
+            ) => partial_eq(a, b),
             (
-                Binary {
-                    left: la,
-                    operator: oa,
-                    right: ra
-                },
-                Binary {
-                    left: lb,
-                    operator: ob,
-                    right: rb
-                }
-            ) => oa.partial_eq(ob) &&
-                la.partial_eq(lb) &&
-                ra.partial_eq(rb),
+                Binary(a),
+                Binary(b)
+            ) => partial_eq(a, b),
             (
-                StructInitializer {
-                    token: ta,
-                    struct_name: sna,
-                    field_initializers: fia
-                },
-                StructInitializer {
-                    token: tb,
-                    struct_name: snb,
-                    field_initializers: fib
-                }
-            ) => ta.partial_eq(tb) &&
-                sna.partial_eq(snb) &&
-                partial_eq_all(fia, fib),
+                StructInitializer(a),
+                StructInitializer(b)
+            ) => partial_eq(a, b),
             (
-                Cast {
-                    token: ta,
-                    left: la,
-                    target_type: tta,
-                    is_reinterpret_cast: irca,
-                },
-                Cast {
-                    token: tb,
-                    left: lb,
-                    target_type: ttb,
-                    is_reinterpret_cast: ircb,
-                }
-            ) => irca == ircb &&
-                ta.partial_eq(tb) &&
-                la.partial_eq(lb) &&
-                tta.partial_eq(ttb),
+                Cast(a),
+                Cast(b)
+            ) => partial_eq(a, b),
             _ => false,
         }
     }
@@ -311,6 +328,70 @@ impl PartialTreeEq for ImplFunction {
     }
 }
 
+impl PartialTreeEq for StructStatement {
+    type Other = StructStatement;
+    
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.name.partial_eq(&other.name) &&
+            self.token.partial_eq(&other.token) &&
+            partial_eq_all(&self.fields, &other.fields)
+    }
+}
+
+impl PartialTreeEq for FnStatement {
+    type Other = FnStatement;
+    
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.token.partial_eq(&other.token) &&
+            self.function.partial_eq(&other.function)
+    }
+}
+
+impl PartialTreeEq for ImplStatement {
+    type Other = ImplStatement;
+    
+    fn partial_eq(&self, other: &Self) -> bool {
+        self.token.partial_eq(&other.token) &&
+            self.implemented_type.partial_eq(&other.implemented_type) &&
+            partial_eq_all(&self.top_level_statements, &other.top_level_statements) &&
+            partial_eq_all(&self.functions, &other.functions)
+    }
+}
+
+impl PartialTreeEq for ReturnStatement {
+    type Other = ReturnStatement;
+    
+    fn partial_eq(&self, other: &Self) -> bool {
+        if !self.token.partial_eq(&other.token) {
+            return false;
+        }
+        
+        if !((self.expression.is_none() && other.expression.is_none()) ||
+            (self.expression.is_some() && other.expression.is_some()))
+        {
+            return false;
+        }
+        
+        if self.expression.is_none() {
+            return true;
+        }
+        
+        partial_eq(
+            self.expression.as_ref().unwrap().as_ref(),
+            other.expression.as_ref().unwrap().as_ref()
+        )
+    }
+}
+
+impl PartialTreeEq for ExpressionStatement {
+    type Other = ExpressionStatement;
+    
+    fn partial_eq(&self, other: &Self) -> bool {
+        partial_eq(self.expression.as_ref(), other.expression.as_ref())
+    }
+}
+
+
 impl PartialTreeEq for Statement {
     type Other = Statement;
 
@@ -323,84 +404,25 @@ impl PartialTreeEq for Statement {
                 EmptyStatement { semicolon_token: b}
             ) => a.partial_eq(b),
             (
-                StructStatement {
-                    token: ta,
-                    name: na,
-                    fields: fa
-                },
-                StructStatement {
-                    token: tb,
-                    name: nb,
-                    fields: fb
-                }
-            ) => {
-                if !ta.partial_eq(tb) || !na.partial_eq(nb) {
-                    return false;
-                }
-
-                partial_eq_all(fa, fb)
-            },
+                StructStatement(a),
+                StructStatement(b)
+            ) => partial_eq(a, b),
             (
-                FnStatement {
-                    token: ta, function: fa
-                },
-                FnStatement {
-                    token: tb, function: fb,
-                },
-            ) =>
-                ta.partial_eq(tb) && fa.partial_eq(fb),
+                FnStatement(a),
+                FnStatement(b)
+            ) => partial_eq(a, b),
             (
-                ImplStatement {
-                    token: ta,
-                    implemented_type: ita,
-                    top_level_statements: tlsa,
-                    functions: fa,
-                },
-                ImplStatement {
-                    token: tb,
-                    implemented_type: itb,
-                    top_level_statements: tlsb,
-                    functions: fb,
-                }
-            ) => {
-                if !(partial_eq(ta, tb) && partial_eq(ita, itb)) {
-                    return false;
-                }
-
-                partial_eq_all(tlsa, tlsb) && partial_eq_all(fa, fb)
-            },
+                ImplStatement(a),
+                ImplStatement(b)
+            ) => partial_eq(a, b),
             (
-                ReturnStatement {
-                    token: ta,
-                    expression: ea,
-                },
-                ReturnStatement {
-                    token: tb,
-                    expression: eb,
-                }
-            ) => {
-                if !ta.partial_eq(tb) {
-                    return false;
-                }
-
-                if !(ea.is_none() && eb.is_none() || ea.is_some() && eb.is_some()) {
-                    return false;
-                }
-
-                if ea.is_none() {
-                    return true;
-                }
-
-                ea.as_ref().unwrap().as_ref().partial_eq(eb.as_ref().unwrap().as_ref())
-            },
+                ReturnStatement(a),
+                ReturnStatement(b)
+            ) => partial_eq(a, b),
             (
-                ExpressionStatement {
-                    expression: ea,
-                },
-                ExpressionStatement {
-                    expression: eb,
-                }
-            ) => ea.partial_eq(eb),
+                ExpressionStatement(a),
+                ExpressionStatement(b)
+            ) => partial_eq(a, b), 
             _ => false
         }
     }
@@ -432,432 +454,437 @@ return 1_u64;} ;
 };
 struct LinkedListNode;
  */
-
-fn prev_indent(indent: usize) -> usize {
-    if indent >= 4 {
-        indent - 4
-    } else {
-        0
-    }
-}
-
-
-impl Display for TypeKind {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TypeKind::Simple(t) => write!(
-                f, "{}", t.name.literal
-            ),
-            TypeKind::Pointer(t) => write!(
-                f, "*{} {}",
-                if t.points_to_mut { "mut" } else { "const" },
-                t.inner_type
-            )
-        }
-    }
-}
-
-impl Display for TypeAnnotation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "{} {}",
-            if self.is_mut { "mut" } else { "" },
-            self.kind
-        )
-    }
-}
-
-impl Display for TypedDeclaration {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f, "{}: {}",
-            self.name.literal,
-            self.declared_type
-        )
-    }
-}
-
-impl TreePrint for Literal {
-    fn print_tree(&self, indent: usize) -> String {
-        use Literal::*;
-        let indent = " ".repeat(indent);
-
-        match self {
-            U8 { value, .. } =>
-                format!("{}{}_u8", indent, value),
-            U16 { value, .. } =>
-                format!("{}{}_u16", indent, value),
-            U32 { value, .. } =>
-                format!("{}{}_u32", indent, value),
-            U64 { value, .. } =>
-                format!("{}{}_u64", indent, value),
-            I8 { value, .. } =>
-                format!("{}{}_i8", indent, value),
-            I16 { value, .. } =>
-                format!("{}{}_i16", indent, value),
-            I32 { value, .. } =>
-                format!("{}{}_i32", indent, value),
-            I64 { value, .. } =>
-                format!("{}{}_i64", indent, value),
-            F32 { value, .. } =>
-                format!("{}{}_f32", indent, value),
-            F64 { value, .. } =>
-                format!("{}{}_f64", indent, value),
-            Bool { value, .. } =>
-                format!("{}{}_bool", indent, value),
-            Char { value, .. } =>
-                format!("{}'{}'_char", indent, value),
-            String { value, .. } =>
-                format!("{}\"{}\"_string", indent, value),
-            MultilineString {value, .. } =>
-                format!("{}\"{}\"_multiline_string", indent, value),
-        }
-    }
-}
-
-impl TreePrint for Vec<Expression> {
-    fn print_tree(&self, indent: usize) -> String {
-        let list = self.iter().map(|v| v.print_tree(0))
-            .collect::<Vec<_>>().join(", ");
-
-        format!("{}{}", indent, list)
-    }
-}
-
-impl TreePrint for Expression {
-    fn print_tree(&self, indent: usize) -> String {
-        use Expression::*;
-
-        let ts = " ".repeat(indent);
-        let pi = prev_indent(indent);
-
-        match self {
-            Grouping {
-                token: _,
-                expression
-            } => format!("{}({})", ts, expression.print_tree(pi)),
-            Literal(q) => format!("{}{}", ts, q.print_tree(pi)),
-            Identifier {
-                name,
-            } => format!("{}{}", ts, name.literal),
-            DotAccess {
-                object,
-                name,
-            } => format!("{}{}.{}", ts, object.print_tree(pi), name.literal),
-            ArrowAccess {
-                pointer,
-                name,
-            } => format!("{}{}->{}", ts, pointer.print_tree(pi), name.literal),
-            Call {
-                callee,
-                arguments,
-                ..
-            } => format!("{}{}({})", ts, callee.print_tree(0), arguments.print_tree(0)),
-            ArraySlice {
-                array_expression,
-                slice_expression,
-                ..
-            } => format!(
-                "{}{}[{}]", ts,
-                array_expression.print_tree(0),
-                slice_expression.print_tree(0),
-            ),
-            Unary {
-                operator,
-                expression,
-                ..
-            } => format!(
-                "{}{}{}",
-                ts,
-                operator.lexeme,
-                expression.print_tree(0),
-            ),
-            Cast {
-                left,
-                target_type,
-                is_reinterpret_cast,
-                ..
-            } => format!(
-                "{}{} {} {}",
-                ts,
-                left.print_tree(0),
-                if *is_reinterpret_cast { "as raw" } else { "as" },
-                target_type
-            ),
-            Binary {
-                left,
-                operator,
-                right,
-            } => format!(
-                "{}{} {} {}",
-                ts,
-                left.print_tree(0),
-                operator.lexeme,
-                right.print_tree(0)
-            ),
-            // Range {
-            //     token: Token,
-            //     start: Box<Expression>,
-            //     end: Box<Expression>,
-            //     inclusive: bool,
-            // },
-            InplaceAssignment {
-                lhs,
-                operator,
-                rhs,
-                ..
-            } => format!(
-                "{}{} {} {}",
-                ts,
-                lhs.print_tree(0),
-                operator.lexeme,
-                rhs.print_tree(0)
-            ),
-            Assignment {
-                lhs,
-                rhs,
-                ..
-            } => format!(
-                "{}{} = {}",
-                ts,
-                lhs.print_tree(0),
-                rhs.print_tree(0)
-            ),
-            // IfElseExpression {
-            //     token: Token,
-            //     condition: Box<Expression>,
-            //     then_branch: Box<Statement>,
-            //     else_branch: Box<Statement>,
-            // },
-            // Block {
-            //     token: Token,
-            //     statements: Vec<Statement>,
-            //     return_expression: Option<Box<Expression>>,
-            // },
-            SelfExpression { .. } => "self".to_string(),
-            // FnExpression {
-            //     token: Token,
-            //     function: Function,
-            // },
-            StructInitializer {
-                struct_name,
-                field_initializers,
-                ..
-            } => format!(
-                "{}{} initializer",
-                ts,
-                struct_name.literal,
-            ),
-            _ => todo!()
-        }
-    }
-}
-
-impl<Printable> TreePrint for Option<Printable>
-where
-    Printable: Deref,
-    Printable::Target: TreePrint,
-{
-    fn print_tree(&self, indent: usize) -> String {
-        if let Some(printable) = self {
-            printable.print_tree(indent)
-        } else {
-            String::new()
-        }
-    }
-}
-
-
-impl TreePrint for Vec<Statement> {
-    fn print_tree(&self, indent: usize) -> String {
-
-        let list = self.iter()
-            .map(
-                |v| format!("{};", v.print_tree(0))
-            ).collect::<Vec<_>>().join(format!("\n{}", " ".repeat(indent)).as_str());
-        
-        list
-    }
-}
-
-
-impl TreePrint for Function {
-    fn print_tree(&self, indent: usize) -> String {
-        format!(
-            "{}fn {}({}) -> {} {{\n{}\n}}",
-            " ".repeat(indent),
-            self.name.literal,
-            self.arguments.iter()
-                .map(|td| format!("{}", td))
-                .collect::<Vec<_>>()
-                .join(", "),
-            if let Some(rt) = self.return_type.as_ref() {
-                rt.to_string()
-            } else {
-                "void".to_string()
-            },
-            self.body.print_tree(indent)
-        )
-    }
-}
-
-impl TreePrint for Method {
-    fn print_tree(&self, indent: usize) -> String {
-        format!(
-            "{}fn {}({}, {}) -> {} {{\n{}\n}}",
-            " ".repeat(indent),
-            self.name.literal,
-            if self.is_mut_self {
-                "*mut self"
-            } else {
-                "*self"
-            },
-            self.arguments.iter()
-                .map(|td| format!("{}", td))
-                .collect::<Vec<_>>()
-                .join(", "),
-            if let Some(rt) = self.return_type.as_ref() {
-                rt.to_string()
-            } else {
-                "void".to_string()
-            },
-            self.body.print_tree(indent)
-        )
-    }
-}
-
-impl TreePrint for ImplFunction {
-    fn print_tree(&self, indent: usize) -> String {
-        use ImplFunction::*;
-        
-        match self {
-            Function(f) => f.print_tree(indent),
-            Method(m) => m.print_tree(indent),
-        }
-    }
-}
-
-impl TreePrint for Vec<ImplFunction> {
-    fn print_tree(&self, indent: usize) -> String {
-        self.iter()
-            .map(|f| f.print_tree(indent))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-}
-
-impl TreePrint for Statement {
-    fn print_tree(&self, indent: usize) -> String {
-        use Statement::*;
-        let ts = " ".repeat(indent);
-
-        match self {
-            EmptyStatement { .. } => format!("{};", indent),
-            LetStatement { //+-
-                name,
-                variable_type,
-                initializer,
-                is_mut,
-                ..
-            } => format!(
-                "{}let {} = {}", ts, name.literal, initializer.print_tree(0)
-            ),
-            StaticStatement { //+-
-                // name,
-                // variable_type,
-                // initializer,
-                // is_mut,
-                ..
-            } => format!("{}static statement", ts),
-            ConstStatement { //+-
-                // token: Token,
-                // name: Token,
-                // variable_type: TypeAnnotation,
-                // initializer: Box<Expression>,
-                ..
-            } => format!("{}const statement", ts),
-            ExpressionStatement { //++
-                expression
-            } => format!("{}{}", ts, expression.print_tree(0)),
-            WhileStatement { //++
-                condition, 
-                body,
-                ..
-            } => format!(
-                "{}while {} {{\n{}\n}}",
-                ts,
-                condition.print_tree(0),
-                body.print_tree(indent + 4)
-            ),
-            BreakStatement {
-                ..
-            } => format!("{}break", ts),
-            ContinueStatement { //+
-                ..
-            } => format!("{}continue", ts),
-            FnStatement { //+
-                function,
-                ..
-            } => format!("{}{}", ts, function.print_tree(indent + 4)),
-            ReturnStatement { //+
-                expression,
-                ..
-            } => format!("{}return {}", ts, expression.print_tree(0)),
-            DeferStatement {
-                ..
-            } => format!("{}defer", ts),
-            StructStatement {
-                name,
-                ..
-            } => format!("{}struct {}", ts, name.literal),
-            // UnionStructStatement {
-            //     token: Token,
-            //     name: Token,
-            //     fields: Vec<SizedTypedDeclaration>
-            // },
-            // EnumStructStatement {
-            //     token: Token,
-            //     name: Token,
-            //     variants: Vec<EnumVariant>
-            // },
-
-            ImplStatement {
-                implemented_type,
-                functions,
-                ..
-            } => format!(
-                "{}impl {} {{\n{}\n}}",
-                ts, implemented_type.literal,
-                functions.print_tree(indent + 4),
-            ),
-            IfElseStatement {
-                condition,
-                then_branch,
-                else_branch,
-                ..
-            } => {
-                let mut result = vec![];
-                
-                result.push(
-                    format!(
-                        "{}if {} {{\n{}}} ",
-                        ts,
-                        condition.print_tree(0),
-                        then_branch.print_tree(indent + 4)
-                    )
-                );
-                
-                if let  Some(else_branch) = else_branch {
-                    result.push(
-                        format!(
-                            "else {{\n{}\n}}",
-                            else_branch.print_tree(indent + 4)
-                        )
-                    );
-                }
-                
-                result.join(" ")
-            }
-        }
-    }
-}
+// todo! do i even need it . . .
+// fn prev_indent(indent: usize) -> usize {
+//     if indent >= 4 {
+//         indent - 4
+//     } else {
+//         0
+//     }
+// }
+// 
+// 
+// impl Display for TypeKind {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//         match self {
+//             TypeKind::Simple(t) => write!(
+//                 f, "{}", t.name.literal
+//             ),
+//             TypeKind::Pointer(t) => write!(
+//                 f, "*{} {}",
+//                 if t.points_to_mut { "mut" } else { "const" },
+//                 t.inner_type
+//             )
+//         }
+//     }
+// }
+// 
+// impl Display for TypeAnnotation {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//         write!(
+//             f, "{} {}",
+//             if self.is_mut { "mut" } else { "" },
+//             self.kind
+//         )
+//     }
+// }
+// 
+// impl Display for TypedDeclaration {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+//         write!(
+//             f, "{}: {}",
+//             self.name.literal,
+//             self.declared_type
+//         )
+//     }
+// }
+// 
+// impl TreePrint for Literal {
+//     fn print_tree(&self, indent: usize) -> String {
+//         use Literal::*;
+//         let indent = " ".repeat(indent);
+// 
+//         match self {
+//             U8 { value, .. } =>
+//                 format!("{}{}_u8", indent, value),
+//             U16 { value, .. } =>
+//                 format!("{}{}_u16", indent, value),
+//             U32 { value, .. } =>
+//                 format!("{}{}_u32", indent, value),
+//             U64 { value, .. } =>
+//                 format!("{}{}_u64", indent, value),
+//             I8 { value, .. } =>
+//                 format!("{}{}_i8", indent, value),
+//             I16 { value, .. } =>
+//                 format!("{}{}_i16", indent, value),
+//             I32 { value, .. } =>
+//                 format!("{}{}_i32", indent, value),
+//             I64 { value, .. } =>
+//                 format!("{}{}_i64", indent, value),
+//             F32 { value, .. } =>
+//                 format!("{}{}_f32", indent, value),
+//             F64 { value, .. } =>
+//                 format!("{}{}_f64", indent, value),
+//             Bool { value, .. } =>
+//                 format!("{}{}_bool", indent, value),
+//             Char { value, .. } =>
+//                 format!("{}'{}'_char", indent, value),
+//             String { value, .. } =>
+//                 format!("{}\"{}\"_string", indent, value),
+//             MultilineString {value, .. } =>
+//                 format!("{}\"{}\"_multiline_string", indent, value),
+//         }
+//     }
+// }
+// 
+// impl TreePrint for Vec<Expression> {
+//     fn print_tree(&self, indent: usize) -> String {
+//         let list = self.iter().map(|v| v.print_tree(0))
+//             .collect::<Vec<_>>().join(", ");
+// 
+//         format!("{}{}", indent, list)
+//     }
+// }
+// 
+// 
+// impl TreePrint for Grouping {
+//     fn print_tree(&self, indent: usize) -> String {
+//         format!("({})", self.expression.print_tree(indent))
+//     }
+// }
+// 
+// 
+// impl TreePrint for Expression {
+//     fn print_tree(&self, indent: usize) -> String {
+//         use Expression::*;
+// 
+//         let ts = " ".repeat(indent);
+//         let pi = prev_indent(indent);
+// 
+//         match self {
+//             Grouping(g) => format!("{}{}", ts, g.print_tree(indent)), 
+//             Literal(q) => format!("{}{}", ts, q.print_tree(pi)),
+//             Identifier {
+//                 name,
+//             } => format!("{}{}", ts, name.literal),
+//             DotAccess {
+//                 object,
+//                 name,
+//             } => format!("{}{}.{}", ts, object.print_tree(pi), name.literal),
+//             ArrowAccess {
+//                 pointer,
+//                 name,
+//             } => format!("{}{}->{}", ts, pointer.print_tree(pi), name.literal),
+//             Call {
+//                 callee,
+//                 arguments,
+//                 ..
+//             } => format!("{}{}({})", ts, callee.print_tree(0), arguments.print_tree(0)),
+//             ArraySlice {
+//                 array_expression,
+//                 slice_expression,
+//                 ..
+//             } => format!(
+//                 "{}{}[{}]", ts,
+//                 array_expression.print_tree(0),
+//                 slice_expression.print_tree(0),
+//             ),
+//             Unary {
+//                 operator,
+//                 expression,
+//                 ..
+//             } => format!(
+//                 "{}{}{}",
+//                 ts,
+//                 operator.lexeme,
+//                 expression.print_tree(0),
+//             ),
+//             Cast {
+//                 left,
+//                 target_type,
+//                 is_reinterpret_cast,
+//                 ..
+//             } => format!(
+//                 "{}{} {} {}",
+//                 ts,
+//                 left.print_tree(0),
+//                 if *is_reinterpret_cast { "as raw" } else { "as" },
+//                 target_type
+//             ),
+//             Binary {
+//                 left,
+//                 operator,
+//                 right,
+//             } => format!(
+//                 "{}{} {} {}",
+//                 ts,
+//                 left.print_tree(0),
+//                 operator.lexeme,
+//                 right.print_tree(0)
+//             ),
+//             // Range {
+//             //     token: Token,
+//             //     start: Box<Expression>,
+//             //     end: Box<Expression>,
+//             //     inclusive: bool,
+//             // },
+//             InplaceAssignment {
+//                 lhs,
+//                 operator,
+//                 rhs,
+//                 ..
+//             } => format!(
+//                 "{}{} {} {}",
+//                 ts,
+//                 lhs.print_tree(0),
+//                 operator.lexeme,
+//                 rhs.print_tree(0)
+//             ),
+//             Assignment {
+//                 lhs,
+//                 rhs,
+//                 ..
+//             } => format!(
+//                 "{}{} = {}",
+//                 ts,
+//                 lhs.print_tree(0),
+//                 rhs.print_tree(0)
+//             ),
+//             // IfElseExpression {
+//             //     token: Token,
+//             //     condition: Box<Expression>,
+//             //     then_branch: Box<Statement>,
+//             //     else_branch: Box<Statement>,
+//             // },
+//             // Block {
+//             //     token: Token,
+//             //     statements: Vec<Statement>,
+//             //     return_expression: Option<Box<Expression>>,
+//             // },
+//             SelfExpression { .. } => "self".to_string(),
+//             // FnExpression {
+//             //     token: Token,
+//             //     function: Function,
+//             // },
+//             StructInitializer {
+//                 struct_name,
+//                 field_initializers,
+//                 ..
+//             } => format!(
+//                 "{}{} initializer",
+//                 ts,
+//                 struct_name.literal,
+//             ),
+//             _ => todo!()
+//         }
+//     }
+// }
+// 
+// impl<Printable> TreePrint for Option<Printable>
+// where
+//     Printable: Deref,
+//     Printable::Target: TreePrint,
+// {
+//     fn print_tree(&self, indent: usize) -> String {
+//         if let Some(printable) = self {
+//             printable.print_tree(indent)
+//         } else {
+//             String::new()
+//         }
+//     }
+// }
+// 
+// 
+// impl TreePrint for Vec<Statement> {
+//     fn print_tree(&self, indent: usize) -> String {
+// 
+//         let list = self.iter()
+//             .map(
+//                 |v| format!("{};", v.print_tree(0))
+//             ).collect::<Vec<_>>().join(format!("\n{}", " ".repeat(indent)).as_str());
+//         
+//         list
+//     }
+// }
+// 
+// 
+// impl TreePrint for Function {
+//     fn print_tree(&self, indent: usize) -> String {
+//         format!(
+//             "{}fn {}({}) -> {} {{\n{}\n}}",
+//             " ".repeat(indent),
+//             self.name.literal,
+//             self.arguments.iter()
+//                 .map(|td| format!("{}", td))
+//                 .collect::<Vec<_>>()
+//                 .join(", "),
+//             if let Some(rt) = self.return_type.as_ref() {
+//                 rt.to_string()
+//             } else {
+//                 "void".to_string()
+//             },
+//             self.body.print_tree(indent)
+//         )
+//     }
+// }
+// 
+// impl TreePrint for Method {
+//     fn print_tree(&self, indent: usize) -> String {
+//         format!(
+//             "{}fn {}({}, {}) -> {} {{\n{}\n}}",
+//             " ".repeat(indent),
+//             self.name.literal,
+//             if self.is_mut_self {
+//                 "*mut self"
+//             } else {
+//                 "*self"
+//             },
+//             self.arguments.iter()
+//                 .map(|td| format!("{}", td))
+//                 .collect::<Vec<_>>()
+//                 .join(", "),
+//             if let Some(rt) = self.return_type.as_ref() {
+//                 rt.to_string()
+//             } else {
+//                 "void".to_string()
+//             },
+//             self.body.print_tree(indent)
+//         )
+//     }
+// }
+// 
+// impl TreePrint for ImplFunction {
+//     fn print_tree(&self, indent: usize) -> String {
+//         use ImplFunction::*;
+//         
+//         match self {
+//             Function(f) => f.print_tree(indent),
+//             Method(m) => m.print_tree(indent),
+//         }
+//     }
+// }
+// 
+// impl TreePrint for Vec<ImplFunction> {
+//     fn print_tree(&self, indent: usize) -> String {
+//         self.iter()
+//             .map(|f| f.print_tree(indent))
+//             .collect::<Vec<_>>()
+//             .join("\n")
+//     }
+// }
+// 
+// impl TreePrint for Statement {
+//     fn print_tree(&self, indent: usize) -> String {
+//         use Statement::*;
+//         let ts = " ".repeat(indent);
+// 
+//         match self {
+//             EmptyStatement { .. } => format!("{};", indent),
+//             LetStatement { //+-
+//                 name,
+//                 variable_type,
+//                 initializer,
+//                 is_mut,
+//                 ..
+//             } => format!(
+//                 "{}let {} = {}", ts, name.literal, initializer.print_tree(0)
+//             ),
+//             StaticStatement { //+-
+//                 // name,
+//                 // variable_type,
+//                 // initializer,
+//                 // is_mut,
+//                 ..
+//             } => format!("{}static statement", ts),
+//             ConstStatement { //+-
+//                 // token: Token,
+//                 // name: Token,
+//                 // variable_type: TypeAnnotation,
+//                 // initializer: Box<Expression>,
+//                 ..
+//             } => format!("{}const statement", ts),
+//             ExpressionStatement { //++
+//                 expression
+//             } => format!("{}{}", ts, expression.print_tree(0)),
+//             WhileStatement { //++
+//                 condition, 
+//                 body,
+//                 ..
+//             } => format!(
+//                 "{}while {} {{\n{}\n}}",
+//                 ts,
+//                 condition.print_tree(0),
+//                 body.print_tree(indent + 4)
+//             ),
+//             BreakStatement {
+//                 ..
+//             } => format!("{}break", ts),
+//             ContinueStatement { //+
+//                 ..
+//             } => format!("{}continue", ts),
+//             FnStatement { //+
+//                 function,
+//                 ..
+//             } => format!("{}{}", ts, function.print_tree(indent + 4)),
+//             ReturnStatement { //+
+//                 expression,
+//                 ..
+//             } => format!("{}return {}", ts, expression.print_tree(0)),
+//             DeferStatement {
+//                 ..
+//             } => format!("{}defer", ts),
+//             StructStatement {
+//                 name,
+//                 ..
+//             } => format!("{}struct {}", ts, name.literal),
+//             // UnionStructStatement {
+//             //     token: Token,
+//             //     name: Token,
+//             //     fields: Vec<SizedTypedDeclaration>
+//             // },
+//             // EnumStructStatement {
+//             //     token: Token,
+//             //     name: Token,
+//             //     variants: Vec<EnumVariant>
+//             // },
+// 
+//             ImplStatement {
+//                 implemented_type,
+//                 functions,
+//                 ..
+//             } => format!(
+//                 "{}impl {} {{\n{}\n}}",
+//                 ts, implemented_type.literal,
+//                 functions.print_tree(indent + 4),
+//             ),
+//             IfElseStatement {
+//                 condition,
+//                 then_branch,
+//                 else_branch,
+//                 ..
+//             } => {
+//                 let mut result = vec![];
+//                 
+//                 result.push(
+//                     format!(
+//                         "{}if {} {{\n{}}} ",
+//                         ts,
+//                         condition.print_tree(0),
+//                         then_branch.print_tree(indent + 4)
+//                     )
+//                 );
+//                 
+//                 if let  Some(else_branch) = else_branch {
+//                     result.push(
+//                         format!(
+//                             "else {{\n{}\n}}",
+//                             else_branch.print_tree(indent + 4)
+//                         )
+//                     );
+//                 }
+//                 
+//                 result.join(" ")
+//             }
+//         }
+//     }
+// }

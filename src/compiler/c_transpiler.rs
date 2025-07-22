@@ -1,8 +1,6 @@
 use crate::parser::errors::ParserError;
 use crate::parser::parser::Parser;
-use crate::syntax::ast::{Expression, ImplFunction, Literal, PointerAnnotation, Statement, TypeAnnotation, TypeKind, TypedDeclaration};
-use crate::syntax::lexer::Token;
-use crate::syntax::traits::TreePrint;
+use crate::syntax::ast::{Assignment, Binary, Expression, ExpressionStatement, FnStatement, ImplFunction, Literal, PointerAnnotation, Statement, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
 
 pub struct CTranspiler<'a> {
     parser: &'a mut Parser
@@ -40,30 +38,25 @@ impl<'a> CTranspiler<'a> {
         use crate::syntax::ast::Statement::*;
 
         match statement {
-            FnStatement {
-                token,
-                function
-            } => self.transpile_function(function),
-            ExpressionStatement {
-                expression
-            } => self.transpile_expression_statement(expression),
-            WhileStatement {
-                condition, body,
-                ..
-            } => self.transpile_while_statement(condition, body),
+            FnStatement(function) =>
+                self.transpile_function(function),
+            ExpressionStatement(expression) =>
+                self.transpile_expression_statement(expression),
+            WhileStatement(while_statement) => 
+                self.transpile_while_statement(while_statement),
             _ => "".to_string()
             // _ => todo!("not implemented\n\t{:?}", statement)
         }
     }
 
     fn transpile_while_statement(
-        &self, condition: &Expression, body: &Vec<Statement>
+        &self, while_statement: &WhileStatement
     ) -> String {
         let mut result = String::from("while (");
-        result.push_str(self.transpile_expression(condition).as_str());
+        result.push_str(self.transpile_expression(&while_statement.condition).as_str());
         result.push_str(") {\n\t");
         
-        let body = body.iter()
+        let body = while_statement.body.iter()
             .map(|statement| self.transpile_statement(statement))
             .collect::<Vec<String>>()
             .join("\n\t\t");
@@ -78,21 +71,11 @@ impl<'a> CTranspiler<'a> {
         let mut result = String::from("(");
 
         let expr = match expression {
-            Assignment {
-                lhs, rhs,
-                ..
-            } => self.assignment(lhs, rhs),
-            Binary {
-                left,
-                operator,
-                right,
-            } => self.transpile_binary(&operator, left, right),
-            Unary {
-                operator, expression,
-                ..
-            } => self.transpile_unary(operator, expression),
+            Assignment(assignment) => self.assignment(assignment),
+            Binary(binary) => self.transpile_binary(binary),
+            Unary(unary) => self.transpile_unary(unary),
             Literal(lit) => self.transpile_literal(lit),
-            _ => format!("/* {} */", expression.print_tree(0))
+            _ => format!("/* {:?} */", expression)
             // _ => todo!("not implemented\n\t{:?}", expression)
         };
 
@@ -102,10 +85,10 @@ impl<'a> CTranspiler<'a> {
         result
     }
 
-    fn assignment(&self, lhs: &Expression, rhs: &Expression) -> String {
-        let mut lhs = self.transpile_expression(lhs);
+    fn assignment(&self, assignment: &Assignment) -> String {
+        let mut lhs = self.transpile_expression(&assignment.lhs);
         lhs.push_str(" = ");
-        lhs.push_str(self.transpile_expression(rhs).as_str());
+        lhs.push_str(self.transpile_expression(&assignment.rhs).as_str());
 
         lhs
     }
@@ -162,38 +145,36 @@ impl<'a> CTranspiler<'a> {
         }
     }
 
-    fn transpile_unary(&self, operator: &Token, expression: &Expression) -> String {
-        let mut result = String::from(operator.lexeme.as_str());
+    fn transpile_unary(&self, unary: &Unary) -> String {
+        let mut result = String::from(unary.operator.lexeme.as_str());
 
-        result.push_str(self.transpile_expression(expression).as_str());
+        result.push_str(self.transpile_expression(&unary.expression).as_str());
 
         result
     }
-    fn transpile_binary(
-        &self, operator: &Token, left: &Expression, right: &Expression
-    ) -> String {
-        let mut left = self.transpile_expression(left);
+    fn transpile_binary(&self, binary: &Binary) -> String {
+        let mut left = self.transpile_expression(&binary.left);
         left.push(' ');
-        left.push_str(&operator.lexeme.to_string());
+        left.push_str(&binary.operator.lexeme.to_string());
         left.push(' ');
 
-        left.push_str(self.transpile_expression(right).as_str());
+        left.push_str(self.transpile_expression(&binary.right).as_str());
 
         left
     }
 
-    fn transpile_expression_statement(&self, expression: &Expression) -> String {
-        let mut transpiled = self.transpile_expression(expression);
+    fn transpile_expression_statement(&self, statement: &ExpressionStatement) -> String {
+        let mut transpiled = self.transpile_expression(&statement.expression);
 
         transpiled.push(';');
 
         transpiled
     }
 
-    fn transpile_function(&self, function: &ImplFunction) -> String {
+    fn transpile_function(&self, statement: &FnStatement) -> String {
         let mut result = String::new();
 
-        match function {
+        match &statement.function {
             ImplFunction::Function(function) => {
                 if let Some(rt) = &function.return_type {
                     result.push_str(self.transpile_type_annotation(&rt).as_str());
@@ -225,7 +206,7 @@ impl<'a> CTranspiler<'a> {
 
                 result.push_str("\n}\n\n");
             },
-            _ => todo!("not implemented\n\t{:?}", function)
+            _ => todo!("not implemented\n\t{:?}", statement)
         }
 
         result

@@ -25,11 +25,11 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/struct_no_fields.lr",
         vec![
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestNoFields"),
-                fields: vec![],
-            }
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestNoFields"),
+                vec![],
+            )
         ]
     )
 ]
@@ -37,10 +37,10 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/struct_simple_fields.lr",
         vec![
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestStructWithSimpleFields"),
-                fields: vec![
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestStructWithSimpleFields"),
+                vec![
                     ttypedecl!("test_field_i8", TokenType::I8),
                     ttypedecl!("test_field_i16", TokenType::I16),
                     ttypedecl!("test_field_i32", TokenType::I32),
@@ -54,7 +54,7 @@ pub fn assert_tree_eq(
                     ttypedecl!("test_field_bool", TokenType::Bool),
                     ttypedecl!("test_field_char", TokenType::Char),
                 ]
-            }
+            ) 
         ]
     )
 ]
@@ -62,21 +62,21 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/struct_compound_fields.lr",
          vec![
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TypeA"),
-                fields: vec![
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TypeA"),
+                vec![
                     ttypedecl!("type_a_field_1", TokenType::I32),
                 ]
-            },
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestCompound"),
-                fields: vec![
+            ),
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestCompound"),
+                vec![
                     ttypedecl!("type_a", "TypeA"),
                     ttypedecl!("simple_i32", TokenType::I32),
                 ]
-            }
+            )
         ]
     )
 ]
@@ -84,17 +84,17 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/struct_pointer_fields.lr",
         vec![
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestStructA"),
-                fields: vec![
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestStructA"),
+                vec![
                     ttypedecl!("test_field_i8", TokenType::I8),
                 ]
-            },
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestStructWithSimpleFields"),
-                fields: vec![
+            ),
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestStructWithSimpleFields"),
+                vec![
                     ttypedeclptr!(
                         "test_field_i8", TokenType::I8, false
                     ),
@@ -126,7 +126,7 @@ pub fn assert_tree_eq(
                     },
                     ttypedeclptr!("test_field_test_struct_a", "TestStructA", true),
                 ]
-           },
+           ),
         ]
     )
 ]
@@ -134,15 +134,15 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/fn_no_args_no_return_empty.lr",
         vec![
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test"),
                     arguments: vec![],
                     return_type: None,
                     body: vec![],
                 })
-            },
+            ),
         ]
     )
 ]
@@ -150,29 +150,29 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/fn_no_args_simple_return_empty.lr",
          vec![
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test"),
                     arguments: vec![],
                     return_type: Some(ttypean!(TokenType::I32)),
                     body: vec![],
                 })
-            },
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestA"),
-                fields: vec![],
-            },
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            ),
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestA"),
+                vec![],
+            ),
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test2"),
                     arguments: vec![],
                     return_type: Some(ttypean!("TestA")),
                     body: vec![],
                 })
-            },
+            ),
         ]
     )
 ]
@@ -180,9 +180,9 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/fn_simple_args_simple_return_empty.lr",
         vec![
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test"),
                     arguments: vec![
                         ttypedecl!("a_i32", TokenType::I32),
@@ -191,15 +191,15 @@ pub fn assert_tree_eq(
                     return_type: Some(ttypean!(TokenType::I32)),
                     body: vec![],
                 })
-            },
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestA"),
-                fields: vec![],
-            },
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            ),
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestA"),
+                vec![],
+            ),
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test2"),
                     arguments: vec![
                         ttypedecl!("a1", TokenType::I8),
@@ -215,7 +215,7 @@ pub fn assert_tree_eq(
                     return_type: Some(ttypean!("TestA")),
                     body: vec![],
                 })
-            },
+            ),
         ]
     )
 ]
@@ -223,9 +223,9 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/fn_simple_args_simple_return_simple_body.lr",
         vec![
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test"),
                     arguments: vec![
                         ttypedecl!("a_i32", TokenType::I32),
@@ -233,23 +233,23 @@ pub fn assert_tree_eq(
                     ],
                     return_type: Some(ttypean!(TokenType::I32)),
                     body: vec![
-                        Statement::ReturnStatement {
-                            token: ttoken(TokenType::Return, "return", ""),
-                            expression: Some(Box::new(tbinary!("a", TokenType::Star, "b"))),
-                        }
+                        Statement::new_return(
+                            ttoken(TokenType::Return, "return", ""),
+                            Some(Box::new(tbinary!("a", TokenType::Star, "b"))),
+                        )
                     ],
                 })
-            },
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("TestA"),
-                fields: vec![
+            ),
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("TestA"),
+                vec![
                     ttypedecl!("a", TokenType::I32),
                 ],
-            },
-            Statement::FnStatement {
-                token: ttoken(TokenType::Fn, "fn", ""),
-                function: ImplFunction::Function(Function {
+            ),
+            Statement::new_fn(
+                ttoken(TokenType::Fn, "fn", ""),
+                ImplFunction::Function(Function {
                     name: tidentifier("test2"),
                     arguments: vec![
                         ttypedecl!("a1", TokenType::I8),
@@ -264,23 +264,23 @@ pub fn assert_tree_eq(
                     ],
                     return_type: Some(ttypean!("TestA")),
                     body: vec![
-                        Statement::ExpressionStatement {
-                            expression: Box::new(Expression::Grouping {
-                                token: ttoken(TokenType::LeftParenthesis, "(", ""),
-                                expression: Box::new(tbinary!("a1", TokenType::Plus, "a1")),
-                            })
-                        },
-                        Statement::ReturnStatement {
-                            token: ttoken(TokenType::Return, "return", ""),
-                            expression: Some(Box::new(Expression::StructInitializer {
-                                token: ttoken(TokenType::LeftBrace, "{", ""),
-                                struct_name: tidentifier("TestA"),
-                                field_initializers: vec![],
-                            })),
-                        }
+                        Statement::new_expression(
+                            Expression::new_grouping(
+                                ttoken(TokenType::LeftParenthesis, "(", ""),
+                                tbinary!("a1", TokenType::Plus, "a1"),
+                            )
+                        ),
+                        Statement::new_return(
+                            ttoken(TokenType::Return, "return", ""),
+                            Some(Box::new(Expression::new_struct_initializer(
+                                ttoken(TokenType::LeftBrace, "{", ""),
+                                tidentifier("TestA"),
+                                vec![],
+                            ))),
+                        )
                     ],
                 })
-            },
+            ),
         ]
     )
 ]
@@ -289,17 +289,17 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/impl_empty.lr",
         vec![
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("Test"),
-                fields: vec![],
-            },
-            Statement::ImplStatement {
-                token: ttoken(TokenType::Impl, "impl", ""),
-                implemented_type: tidentifier("Test"),
-                top_level_statements: vec![],
-                functions: vec![],
-            }
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("Test"),
+                vec![],
+            ),
+            Statement::new_impl(
+                ttoken(TokenType::Impl, "impl", ""),
+                tidentifier("Test"),
+                vec![],
+                vec![],
+            )
         ]
     )
 ]
@@ -307,16 +307,16 @@ pub fn assert_tree_eq(
     case(
         "./resources/simple/impl_simple.lr",
         vec![
-            Statement::StructStatement {
-                token: ttoken(TokenType::Struct, "struct", ""),
-                name: tidentifier("Test"),
-                fields: vec![],
-            },
-            Statement::ImplStatement {
-                token: ttoken(TokenType::Impl, "impl", ""),
-                implemented_type: tidentifier("Test"),
-                top_level_statements: vec![],
-                functions: vec![
+            Statement::new_struct(
+                ttoken(TokenType::Struct, "struct", ""),
+                tidentifier("Test"),
+                vec![],
+            ),
+            Statement::new_impl(
+                ttoken(TokenType::Impl, "impl", ""),
+                tidentifier("Test"),
+                vec![],
+                vec![
                     ImplFunction::Function(Function {
                         name: tidentifier("function"),
                         arguments: vec![],
@@ -330,21 +330,21 @@ pub fn assert_tree_eq(
                         ],
                         return_type: Some(ttypean!(TokenType::I64)),
                         body: vec![
-                            Statement::ReturnStatement {
-                                token: ttoken(TokenType::Return, "return", ""),
-                                expression: Some(Box::new(Expression::Cast {
-                                    token: ttoken(TokenType::As, "as", ""),
-                                    left: Box::new(Expression::Identifier {
-                                        name: tidentifier("a"),
-                                    }),
-                                    target_type: ttypean!(TokenType::I64),
-                                    is_reinterpret_cast: false,
-                                }))
-                            }
+                            Statement::new_return(
+                                ttoken(TokenType::Return, "return", ""),
+                                Some(Box::new(Expression::new_cast(
+                                    ttoken(TokenType::As, "as", ""),
+                                    Expression::new_identifier(
+                                        tidentifier("a"),
+                                    ),
+                                    ttypean!(TokenType::I64),
+                                    false,
+                                )))
+                            )
                         ],
                     }),
                 ],
-            }
+            )
         ]
     )
 ]
