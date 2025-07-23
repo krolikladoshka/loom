@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::rc::Rc;
 use crate::parser::parser::Parser;
 use crate::parser::semantics::traits::{AstContext, Semantics};
 use crate::syntax::ast::Statement;
@@ -14,7 +15,7 @@ where
     SharedContext: AstContext,
 {
     parser: &'a mut Parser,
-    analyzers: Vec<Box<dyn Semantics<SharedContext>>>,
+    analyzers: Vec<Rc<dyn Semantics<SharedContext>>>,
     _marker: PhantomData<Ast>,
 }
 
@@ -30,25 +31,35 @@ where
     }
 
     pub fn with<T: Semantics<SharedContext> + 'static>(
-        &'a mut self,
+        mut self,
         analyzer: T
-    ) -> &'a mut Self {
-        self.analyzers.push(Box::new(analyzer));
+    ) -> Self {
+        self.analyzers.push(Rc::new(analyzer));
 
         self
     }
 
+    pub fn add<T: Semantics<SharedContext> + 'static>(
+        &mut self,
+        semantics: T,
+    )
+    {
+        self.analyzers.push(Rc::new(semantics));
+    }
+
     pub fn analyze_next(&mut self, statement: &Statement, context: &mut SharedContext) {
-        for analyzer in self.analyzers.iter() { ;
+        for analyzer in self.analyzers.iter() {
             analyzer.analyze_statement(statement, context);
         }
     }
 
-    pub fn analyze(&mut self) {
+    pub fn analyze(&mut self) -> SharedContext {
         let mut context = SharedContext::default();
 
         while let Ok(statement) = self.parser.parse_next() {
             self.analyze_next(&statement, &mut context);
         }
+        
+        context
     }
 }

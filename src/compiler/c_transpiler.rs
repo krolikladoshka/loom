@@ -1,6 +1,11 @@
 use crate::parser::errors::ParserError;
 use crate::parser::parser::Parser;
+use crate::parser::semantics::traits::Semantics;
 use crate::syntax::ast::{Assignment, Binary, Expression, ExpressionStatement, FnStatement, ImplFunction, Literal, PointerAnnotation, Statement, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
+
+pub struct CTranspilerSemantics;
+
+impl Semantics<> for CTranspilerSemantics {}
 
 pub struct CTranspiler<'a> {
     parser: &'a mut Parser

@@ -14,6 +14,7 @@ pub struct Parser {
     start_position: usize,
     current_position: usize,
     panic_on_error: bool,
+    node_id_counter: usize,
 }
 
 
@@ -24,9 +25,23 @@ impl Parser {
             start_position: 0,
             current_position: 0,
             panic_on_error: false,
+            node_id_counter: 0,
         }
     }
-
+    
+    #[inline(always)]
+    pub fn current_node_id(&self) -> usize {
+        self.node_id_counter
+    }
+    
+    #[inline(always)]
+    fn next_node_id(&mut self) -> usize {
+        let current_node_id = self.node_id_counter;
+        self.node_id_counter += 1;
+        
+        current_node_id
+    }
+    
     #[inline(always)]
     fn wrap_error(&mut self, error: ParserError) -> ParserError {
         if self.panic_on_error {
@@ -186,6 +201,9 @@ impl Parser {
 
         let result = self.top_level_statement();
         
+        if result.is_err() {
+            self.advance_until_next_statement();
+        }
         self.advance_skipping_comments();
         
         result

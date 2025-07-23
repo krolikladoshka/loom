@@ -202,9 +202,12 @@ where
 
     fn analyze_grouping(
         &self,
-        _grouping: &Grouping,
-        _context: &mut SharedContext,
-    ) {}
+        grouping: &Grouping,
+        context: &mut SharedContext,
+    )
+    {
+        self.analyze_expression(&grouping.expression, context);
+    }
 
     fn analyze_literal(
         &self,
@@ -277,18 +280,48 @@ where
         _assignment: &Assignment,
         _context: &mut SharedContext,
     ) {}
-
+    
+    fn analyze_if_else_default(
+        &self,
+        if_else: &IfElseExpression,
+        context: &mut SharedContext,
+    )
+    {
+        self.analyze_expression(&if_else.condition, context);
+        self.analyze_all_statements(&if_else.then_branch.statements, context);
+        
+        self.analyze_block_expression(&if_else.then_branch, context);
+        self.analyze_block_expression(&if_else.else_branch, context);
+    }
     fn analyze_if_else(
         &self,
-        _if_else: &IfElseExpression,
-        _context: &mut SharedContext,
-    ) {}
+        if_else: &IfElseExpression,
+        context: &mut SharedContext,
+    )
+    {
+        self.analyze_if_else_default(if_else, context)
+    }
 
+    fn analyze_block_expression_default(
+        &self,
+        block_expression: &BlockExpression,
+        context: &mut SharedContext,
+    )
+    {
+        self.analyze_all_statements(&block_expression.statements, context);
+        if let Some(return_expression) = &block_expression.return_expression {
+            self.analyze_expression(return_expression, context);
+        }
+    }
+    
     fn analyze_block_expression(
         &self,
-        _block: &BlockExpression,
-        _context: &mut SharedContext,
-    ) {}
+        block: &BlockExpression,
+        context: &mut SharedContext,
+    )
+    {
+        self.analyze_block_expression_default(block, context)
+    }
 
     fn analyze_self(
         &self,

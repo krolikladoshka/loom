@@ -2,6 +2,26 @@ use std::fmt::Pointer;
 
 use crate::syntax::lexer::Token;
 
+static mut AST_ID_COUNTER: usize = 0;
+
+pub fn next_id() -> usize {
+    let id = unsafe {
+        AST_ID_COUNTER
+    };
+    
+    unsafe {
+        AST_ID_COUNTER += 1;
+    }
+
+    id
+}
+
+pub fn current_id() -> usize {
+    unsafe {
+        AST_ID_COUNTER
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Identifier {
     pub name: Token,
@@ -192,8 +212,8 @@ pub struct Assignment {
 pub struct IfElseExpression {
     pub token: Token,
     pub condition: Box<Expression>,
-    pub then_branch: Box<Statement>,
-    pub else_branch: Box<Statement>,
+    pub then_branch: BlockExpression,
+    pub else_branch: BlockExpression,
 }
 
 #[derive(Debug, Clone)]
@@ -628,6 +648,8 @@ impl Statement {
         top_level_statements: Vec<Statement>,
         functions: Vec<ImplFunction>,
     ) -> Self {
+        
+        
         Statement::ImplStatement(ImplStatement {
             token,
             implemented_type,
