@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 use std::rc::Rc;
+use crate::parser::errors::ParserError;
 use crate::parser::parser::Parser;
 use crate::parser::semantics::traits::{AstContext, Semantics};
 use crate::syntax::ast::Statement;
@@ -49,15 +50,25 @@ where
 
     pub fn analyze_next(&mut self, statement: &Statement, context: &mut SharedContext) {
         for analyzer in self.analyzers.iter() {
-            analyzer.analyze_statement(statement, context);
+            analyzer.analyze_next(statement, context);
         }
     }
 
     pub fn analyze(&mut self) -> SharedContext {
         let mut context = SharedContext::default();
 
-        while let Ok(statement) = self.parser.parse_next() {
-            self.analyze_next(&statement, &mut context);
+        loop {
+            let parse_result = self.parser.parse_next();
+            match parse_result {
+                Ok(statement) => {
+                    self.analyze_next(&statement, &mut context);
+                },
+                Err(ParserError::Eof) => break,
+                Err(e) => {
+                    panic!("{}", e);
+                }
+            }
+
         }
         
         context

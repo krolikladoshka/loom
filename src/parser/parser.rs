@@ -1,5 +1,5 @@
 use crate::parser::errors::ParserError;
-use crate::syntax::ast::{Expression, FnStatement, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
+use crate::syntax::ast::{AstNodeIndex, Expression, FnStatement, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
 use crate::syntax::lexer::Token;
 use crate::syntax::tokens::TokenType;
 use std::collections::HashMap;
@@ -14,7 +14,7 @@ pub struct Parser {
     start_position: usize,
     current_position: usize,
     panic_on_error: bool,
-    node_id_counter: usize,
+    node_id_counter: AstNodeIndex,
 }
 
 
@@ -25,21 +25,22 @@ impl Parser {
             start_position: 0,
             current_position: 0,
             panic_on_error: false,
-            node_id_counter: 0,
+            node_id_counter: AstNodeIndex(0),
         }
     }
     
     #[inline(always)]
     pub fn current_node_id(&self) -> usize {
-        self.node_id_counter
+        self.node_id_counter.clone().into()
     }
     
     #[inline(always)]
     fn next_node_id(&mut self) -> usize {
-        let current_node_id = self.node_id_counter;
-        self.node_id_counter += 1;
-        
-        current_node_id
+        self.node_id_counter.increment().into()
+        // let current_node_id = self.node_id_counter;
+        // self.node_id_counter += 1;
+        // 
+        // current_node_id
     }
     
     #[inline(always)]
@@ -251,9 +252,7 @@ impl Parser {
     fn empty_statement(&mut self) -> ParserResult<Statement> {
         let token = self.require(TokenType::Semicolon, "Expected semicolon")?;
 
-        Ok(Statement::EmptyStatement {
-            semicolon_token: token
-        })
+        Ok(Statement::new_empty(token))
     }
 
     pub fn top_level_statement(&mut self) -> ParserResult<Statement> {
@@ -1103,10 +1102,10 @@ impl Parser {
 
         Ok(Statement::new_while(
             token.clone(),
-            Expression::Literal(Literal::Bool {
+            Expression::new_literal(Literal::new_bool(
                 token, // TODO: wlel
-                value: true
-            }),
+                true
+            )),
             statements
         ))
     }
@@ -1177,12 +1176,12 @@ impl Parser {
             self.require(TokenType::Semicolon, "")?;
 
 
-            Ok(Statement::new_break(
+            Ok(Statement::new_continue(
                 token,
                 Some(next_token.clone())
             ))
         } else if next_token.token_type == TokenType::Semicolon {
-            Ok(Statement::new_break(token, None))
+            Ok(Statement::new_continue(token, None))
         } else {
             Err(
                 self.wrap_error(ParserError::unexpected_token(
@@ -1403,26 +1402,26 @@ impl Parser {
         };
 
         let literal = match token.token_type {
-            TokenType::U8Literal => Literal::U8 {
-                token: token.clone(),
-                value: self.token_as_literal(&token)?,
-            },
-            TokenType::U16Literal => Literal::U16 {
-                token: token.clone(),
-                value: self.token_as_literal(&token)?,
-            },
-            TokenType::U32Literal => Literal::U32 {
-                token: token.clone(),
-                value: self.token_as_literal(&token)?,
-            },
-            TokenType::U64Literal => Literal::U64 {
-                token: token.clone(),
-                value: self.token_as_literal(&token)?,
-            },
-            TokenType::StringLiteral => Literal::String {
-                token: token.clone(),
-                value: token.literal.clone(),
-            },
+            TokenType::U8Literal => Literal::new_u8(
+                token.clone(), 
+                self.token_as_literal(&token)?
+            ),
+            TokenType::U16Literal => Literal::new_u16(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::U32Literal => Literal::new_u32(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::U64Literal => Literal::new_u64(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::StringLiteral => Literal::new_string(
+                token.clone(),
+                token.literal.clone(),
+            ),
             // },TokenType::U16Literal |
             // TokenType::U32Literal | TokenType::U64Literal |
             // TokenType::I8Literal | TokenType::I16Literal |
@@ -1439,7 +1438,7 @@ impl Parser {
         };
         self.advance_and_skip_next_comments();
 
-        Ok(Expression::Literal(literal))
+        Ok(Expression::new_literal(literal))
     }
 
     fn initializer_for(&mut self, struct_name: Token) -> ParserResult<Expression> {

@@ -4,26 +4,48 @@ use crate::syntax::lexer::Token;
 
 static mut AST_ID_COUNTER: usize = 0;
 
-pub fn next_id() -> usize {
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AstNodeIndex(pub usize);
+
+
+impl AstNodeIndex {
+    pub fn increment(&mut self) -> AstNodeIndex {
+        let result = AstNodeIndex(self.0);
+        self.0 += 1;
+
+        result
+    }
+}
+
+impl Into<usize> for AstNodeIndex {
+    fn into(self) -> usize {
+        self.0
+    }
+}
+
+
+pub fn next_id() -> AstNodeIndex {
     let id = unsafe {
         AST_ID_COUNTER
     };
-    
+
     unsafe {
         AST_ID_COUNTER += 1;
     }
 
-    id
+    AstNodeIndex(id)
 }
 
-pub fn current_id() -> usize {
+pub fn current_id() -> AstNodeIndex {
     unsafe {
-        AST_ID_COUNTER
+        AstNodeIndex(AST_ID_COUNTER)
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Identifier {
+    pub node_id: AstNodeIndex,
     pub name: Token,
 }
 
@@ -39,61 +61,198 @@ pub struct Variable {
 #[derive(Debug, Clone)]
 pub enum Literal {
     U8 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: u8,
     },
     U16 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: u16,
     },
     U32 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: u32,
     },
     U64 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: u64,
     },
     I8 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: i8,
     },
     I16 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: i16,
     },
     I32 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: i32,
     },
     I64 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: i64,
     },
     F32 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: f32,
     },
     F64 {
+        // node_id: AstNodeIndex,
         token: Token,
         value: f64,
     },
     Bool {
+        // node_id: AstNodeIndex,
         token: Token,
         value: bool,
     },
     Char {
+        // node_id: AstNodeIndex,
         token: Token,
         value: char,
     },
     String {
+        // node_id: AstNodeIndex,
         token: Token,
         value: String,
     },
     MultilineString {
+        // node_id: AstNodeIndex,
         token: Token,
         value: String,
     },
+}
+
+impl Literal {
+    // pub fn get_node_id(&self) -> AstNodeIndex {
+    //     match self {
+    //         Literal::U8 { node_id, .. } => *node_id,
+    //         Literal::U16 { node_id, .. } => *node_id,
+    //         Literal::U32 { node_id, .. } => *node_id,
+    //         Literal::U64 { node_id, .. } => *node_id,
+    //         Literal::I8 { node_id, .. } => *node_id,
+    //         Literal::I16 { node_id, .. } => *node_id,
+    //         Literal::I32 { node_id, .. } => *node_id,
+    //         Literal::I64 { node_id, .. } => *node_id,
+    //         Literal::F32 { node_id, .. } => *node_id,
+    //         Literal::F64 { node_id, .. } => *node_id,
+    //         Literal::Bool { node_id, .. } => *node_id,
+    //         Literal::Char { node_id, .. } => *node_id,
+    //         Literal::String { node_id, .. } => *node_id,
+    //         Literal::MultilineString { node_id, .. } => *node_id,
+    //     }
+    // }
+
+    pub fn new_u8(token: Token, value: u8) -> Self {
+        Self::U8 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_u16(token: Token, value: u16) -> Self {
+        Self::U16 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_u32(token: Token, value: u32) -> Self {
+        Self::U32 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_u64(token: Token, value: u64) -> Self {
+        Self::U64 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_i8(token: Token, value: i8) -> Self {
+        Self::I8 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_i16(token: Token, value: i16) -> Self {
+        Self::I16 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_i32(token: Token, value: i32) -> Self {
+        Self::I32 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_i64(token: Token, value: i64) -> Self {
+        Self::I64 {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_bool(token: Token, value: bool) -> Self {
+        Self::Bool {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_char(token: Token, value: char) -> Self {
+        Self::Char {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_string(token: Token, value: String) -> Self {
+        Self::String {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+
+    pub fn new_multiline_string(token: Token, value: String) -> Self {
+        Self::MultilineString {
+            // node_id: next_id(),
+            token,
+            value,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LiteralNode {
+    pub node_id: AstNodeIndex,
+    pub literal: Literal,
 }
 
 #[derive(Debug, Clone)]
@@ -133,24 +292,28 @@ pub struct SizedTypedDeclaration {
 
 #[derive(Debug, Clone)]
 pub struct Grouping {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub expression: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct DotAccess {
+    pub node_id: AstNodeIndex,
     pub object: Box<Expression>,
     pub name: Token,
 }
 
 #[derive(Debug, Clone)]
 pub struct ArrowAccess {
+    pub node_id: AstNodeIndex,
     pub pointer: Box<Expression>,
     pub name: Token,
 }
 
 #[derive(Debug, Clone)]
 pub struct Call {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub callee: Box<Expression>,
     pub arguments: Vec<Expression>,
@@ -158,6 +321,7 @@ pub struct Call {
 
 #[derive(Debug, Clone)]
 pub struct ArraySlice {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub array_expression: Box<Expression>,
     pub slice_expression: Box<Expression>,
@@ -165,6 +329,7 @@ pub struct ArraySlice {
 
 #[derive(Debug, Clone)]
 pub struct Unary {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub operator: Token,
     pub expression: Box<Expression>,
@@ -172,6 +337,7 @@ pub struct Unary {
 
 #[derive(Debug, Clone)]
 pub struct Cast {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub left: Box<Expression>,
     pub target_type: TypeAnnotation,
@@ -180,6 +346,7 @@ pub struct Cast {
 
 #[derive(Debug, Clone)]
 pub struct Binary {
+    pub node_id: AstNodeIndex,
     pub left: Box<Expression>,
     pub operator: Token,
     pub right: Box<Expression>,
@@ -187,6 +354,7 @@ pub struct Binary {
 
 #[derive(Debug, Clone)]
 pub struct Range {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub start: Box<Expression>,
     pub end: Box<Expression>,
@@ -195,6 +363,7 @@ pub struct Range {
 
 #[derive(Debug, Clone)]
 pub struct InplaceAssignment {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub lhs: Box<Expression>,
     pub operator: Token,
@@ -203,6 +372,7 @@ pub struct InplaceAssignment {
 
 #[derive(Debug, Clone)]
 pub struct Assignment {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub lhs: Box<Expression>,
     pub rhs: Box<Expression>,
@@ -210,6 +380,7 @@ pub struct Assignment {
 
 #[derive(Debug, Clone)]
 pub struct IfElseExpression {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub condition: Box<Expression>,
     pub then_branch: BlockExpression,
@@ -218,6 +389,7 @@ pub struct IfElseExpression {
 
 #[derive(Debug, Clone)]
 pub struct BlockExpression {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub statements: Vec<Statement>,
     pub return_expression: Option<Box<Expression>>
@@ -225,17 +397,20 @@ pub struct BlockExpression {
 
 #[derive(Debug, Clone)]
 pub struct SelfExpression {
+    pub node_id: AstNodeIndex,
     pub token: Token,
 }
 
 #[derive(Debug, Clone)]
 pub struct FnExpression {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub function: Function,
 }
 
 #[derive(Debug, Clone)]
 pub struct StructInitializer {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub struct_name: Token,
     pub field_initializers: Vec<(Token, Expression)>,
@@ -244,11 +419,11 @@ pub struct StructInitializer {
 #[derive(Debug, Clone)]
 pub enum Expression {
     Grouping(Grouping),
-    Literal(Literal),
+    Literal(LiteralNode),
     Identifier(Identifier),
-    MethodCall(),
-    DotSet {},
-    ArrowSet {},
+    MethodCall {node_id: AstNodeIndex},
+    DotSet {node_id: AstNodeIndex},
+    ArrowSet {node_id: AstNodeIndex},
     DotAccess(DotAccess),
     ArrowAccess(ArrowAccess),
     Call(Call),
@@ -273,32 +448,41 @@ pub enum Expression {
 }
 
 impl Expression {
+    pub fn new_literal(literal: Literal) -> Expression {
+        Self::Literal(LiteralNode {
+            node_id: next_id(),
+            literal,
+        })
+    }
+    
     pub fn new_block(
         token: Token,
         statements: Vec<Statement>,
         return_expression: Option<Box<Expression>>,
     ) ->  Expression {
         Expression::Block(BlockExpression {
+            node_id: next_id(),
             token, statements, return_expression 
         })
     }
     
     pub fn new_grouping(token: Token, expression: Expression) -> Expression {
         Expression::Grouping(Grouping {
+            node_id: next_id(),
             token, expression: Box::new(expression)
         })
     }
     
     pub fn new_identifier(name: Token) -> Expression {
-        Expression::Identifier(Identifier { name })
+        Expression::Identifier(Identifier { node_id: next_id(),  name })
     }
     
     pub fn new_self(token: Token) -> Expression {
-        Expression::SelfExpression(SelfExpression { token })
+        Expression::SelfExpression(SelfExpression { node_id: next_id(), token })
     }
     
     pub fn new_fn(token: Token, function: Function) -> Expression {
-        Expression::FnExpression(FnExpression { token, function })
+        Expression::FnExpression(FnExpression { node_id: next_id(), token, function })
     }
     
     pub fn new_struct_initializer(
@@ -306,7 +490,8 @@ impl Expression {
         struct_name: Token,
         field_initializers: Vec<(Token, Expression)>,
     ) -> Expression {
-        Expression::StructInitializer(StructInitializer { 
+        Expression::StructInitializer(StructInitializer {
+            node_id: next_id(),
             token, struct_name, field_initializers
         })
     }
@@ -318,6 +503,7 @@ impl Expression {
         is_reinterpret_cast: bool,
     ) -> Expression {
         Expression::Cast(Cast {
+            node_id: next_id(),
             token,
             left: Box::new(left),
             target_type,
@@ -330,6 +516,7 @@ impl Expression {
         name: Token,
     ) -> Expression {
         Expression::DotAccess(DotAccess {
+            node_id: next_id(),
             object: Box::new(object),
             name,
         })
@@ -340,6 +527,7 @@ impl Expression {
         name: Token,
     ) -> Expression {
         Expression::ArrowAccess(ArrowAccess {
+            node_id: next_id(),
             pointer: Box::new(pointer),
             name,
         })
@@ -351,6 +539,7 @@ impl Expression {
         arguments: Vec<Expression>,
     ) -> Expression {
         Expression::Call(Call {
+            node_id: next_id(),
             token,
             callee: Box::new(callee),
             arguments,
@@ -363,6 +552,7 @@ impl Expression {
         slice_expression: Expression,
     ) -> Expression {
         Expression::ArraySlice(ArraySlice {
+            node_id: next_id(),
             token,
             array_expression: Box::new(array_expression),
             slice_expression: Box::new(slice_expression),
@@ -371,6 +561,7 @@ impl Expression {
     
     pub fn new_unary(token: Token, operator: Token, right: Expression) -> Expression {
         Expression::Unary(Unary {
+            node_id: next_id(),
             token,
             operator,
             expression: Box::new(right),
@@ -383,6 +574,7 @@ impl Expression {
         right: Expression,
     ) -> Expression {
         Expression::Binary(Binary {
+            node_id: next_id(),
             left: Box::new(left),
             operator,
             right: Box::new(right),
@@ -395,6 +587,7 @@ impl Expression {
         right: Expression,
     ) -> Expression {
         Expression::Assignment(Assignment {
+            node_id: next_id(),
             token,
             lhs: Box::new(left),
             rhs: Box::new(right),
@@ -408,11 +601,38 @@ impl Expression {
         right: Expression,
     ) -> Expression {
         Expression::InplaceAssignment(InplaceAssignment {
+            node_id: next_id(),
             token,
             lhs: Box::new(left),
             operator,
             rhs: Box::new(right),
         })
+    }
+
+    pub fn get_node_id(&self) -> AstNodeIndex {
+        match self {
+            Expression::Grouping(x) => x.node_id,
+            Expression::Literal(x) => x.node_id,
+            Expression::Identifier(x) => x.node_id,
+            Expression::MethodCall { node_id } => *node_id,
+            Expression::DotSet { node_id } => *node_id,
+            Expression::ArrowSet { node_id } => *node_id,
+            Expression::DotAccess(x) => x.node_id,
+            Expression::ArrowAccess(x) => x.node_id,
+            Expression::Call(x) => x.node_id,
+            Expression::ArraySlice(x) => x.node_id,
+            Expression::Unary(x) => x.node_id,
+            Expression::Cast(x) => x.node_id,
+            Expression::Binary(x) => x.node_id,
+            Expression::Range(x) => x.node_id,
+            Expression::InplaceAssignment(x) => x.node_id,
+            Expression::Assignment(x) => x.node_id,
+            Expression::IfElseExpression(x) => x.node_id,
+            Expression::Block(x) => x.node_id,
+            Expression::SelfExpression(x) => x.node_id,
+            Expression::FnExpression(x) => x.node_id,
+            Expression::StructInitializer(x) => x.node_id,
+        }
     }
 }
 
@@ -445,6 +665,7 @@ pub struct EnumVariant {}
 
 #[derive(Debug, Clone)]
 pub struct LetStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub name: Token,
     pub variable_type: Option<TypeAnnotation>,
@@ -454,6 +675,7 @@ pub struct LetStatement {
 
 #[derive(Debug, Clone)]
 pub struct StaticStatement { //+-
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub name: Token,
     pub variable_type: TypeAnnotation,
@@ -463,6 +685,7 @@ pub struct StaticStatement { //+-
 
 #[derive(Debug, Clone)]
 pub struct ConstStatement{ //+-
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub name: Token,
     pub variable_type: TypeAnnotation,
@@ -471,11 +694,13 @@ pub struct ConstStatement{ //+-
 
 #[derive(Debug, Clone)]
 pub struct ExpressionStatement {
+    pub node_id: AstNodeIndex,
     pub expression: Box<Expression>,
 }
 
 #[derive(Debug, Clone)]
 pub struct WhileStatement { //++
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub condition: Box<Expression>,
     pub body: Vec<Statement>,
@@ -483,30 +708,35 @@ pub struct WhileStatement { //++
 
 #[derive(Debug, Clone)]
 pub struct BreakStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub loop_key: Option<Token>
 }
 
 #[derive(Debug, Clone)]
 pub struct ContinueStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub loop_key: Option<Token>
 }
 
 #[derive(Debug, Clone)]
 pub struct FnStatement{ //+
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub function: ImplFunction,
 }
 
 #[derive(Debug, Clone)]
 pub struct ReturnStatement { //+
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub expression: Option<Box<Expression>>
 }
 
 #[derive(Debug, Clone)]
 pub struct DeferStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub call_expression: Box<Expression>,
     pub to_closest_block: bool
@@ -514,6 +744,7 @@ pub struct DeferStatement {
 
 #[derive(Debug, Clone)]
 pub struct StructStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub name: Token,
     pub fields: Vec<TypedDeclaration>,
@@ -521,6 +752,7 @@ pub struct StructStatement {
 
 #[derive(Debug, Clone)]
 pub struct ImplStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub implemented_type: Token,
     pub top_level_statements: Vec<Statement>,
@@ -529,6 +761,7 @@ pub struct ImplStatement {
 
 #[derive(Debug, Clone)]
 pub struct IfElseStatement {
+    pub node_id: AstNodeIndex,
     pub token: Token,
     pub condition: Box<Expression>,
     pub then_branch: Vec<Statement>,
@@ -539,6 +772,7 @@ pub struct IfElseStatement {
 #[derive(Debug, Clone)]
 pub enum Statement {
     EmptyStatement { //++
+        node_id: AstNodeIndex,
         semicolon_token: Token,
     },
     LetStatement(LetStatement),
@@ -568,8 +802,16 @@ pub enum Statement {
 }
 
 impl Statement {
+    pub fn new_empty(token: Token) -> Self {
+        Statement::EmptyStatement {
+            node_id: next_id(),
+            semicolon_token: token,
+        }
+    }
+
     pub fn new_defer(token: Token, call: Expression, to_closest_block: bool) -> Self {
         let defer = DeferStatement {
+            node_id: next_id(),
             token,
             call_expression: Box::new(call),
             to_closest_block,
@@ -585,6 +827,7 @@ impl Statement {
         is_mut: bool,
     ) -> Self {
         Statement::LetStatement(LetStatement {
+            node_id: next_id(),
             token,
             name,
             variable_type,
@@ -601,6 +844,7 @@ impl Statement {
         is_mut: bool,
     ) -> Self {
         Statement::StaticStatement(StaticStatement {
+            node_id: next_id(),
             token,
             name,
             variable_type,
@@ -616,6 +860,7 @@ impl Statement {
         initializer: Box<Expression>,
     ) -> Self {
         Statement::ConstStatement(ConstStatement {
+            node_id: next_id(),
             token,
             name,
             variable_type,
@@ -625,6 +870,7 @@ impl Statement {
     
     pub fn new_fn(token: Token, function: ImplFunction) -> Self {
         Statement::FnStatement(FnStatement{
+            node_id: next_id(),
             token,
             function,
         })
@@ -636,6 +882,7 @@ impl Statement {
         fields: Vec<TypedDeclaration>,
     ) -> Self {
         Statement::StructStatement(StructStatement {
+            node_id: next_id(),
             token,
             name,
             fields,
@@ -648,9 +895,10 @@ impl Statement {
         top_level_statements: Vec<Statement>,
         functions: Vec<ImplFunction>,
     ) -> Self {
-        
-        
+
+
         Statement::ImplStatement(ImplStatement {
+            node_id: next_id(),
             token,
             implemented_type,
             top_level_statements,
@@ -660,6 +908,7 @@ impl Statement {
     
     pub fn new_expression(expression: Expression) -> Self {
         Statement::ExpressionStatement(ExpressionStatement {
+            node_id: next_id(),
             expression: Box::new(expression),
         })
     }
@@ -671,6 +920,7 @@ impl Statement {
         else_branch: Option<Vec<Statement>>,
     ) -> Self {
         Statement::IfElseStatement(IfElseStatement {
+            node_id: next_id(),
             token,
             condition: Box::new(condition),
             then_branch,
@@ -684,6 +934,7 @@ impl Statement {
         body: Vec<Statement>,
     ) -> Self {
         Statement::WhileStatement(WhileStatement {
+            node_id: next_id(),
             token,
             condition: Box::new(condition),
             body,
@@ -692,6 +943,7 @@ impl Statement {
     
     pub fn new_break(token: Token, loop_key: Option<Token>) -> Self {
         Statement::BreakStatement(BreakStatement {
+            node_id: next_id(),
             token,
             loop_key,
         })
@@ -699,6 +951,7 @@ impl Statement {
 
     pub fn new_continue(token: Token, loop_key: Option<Token>) -> Self {
         Statement::ContinueStatement(ContinueStatement {
+            node_id: next_id(),
             token,
             loop_key,
         })
@@ -706,13 +959,42 @@ impl Statement {
     
     pub fn new_return(token: Token, expression: Option<Box<Expression>>) -> Self {
         Statement::ReturnStatement(ReturnStatement {
+            node_id: next_id(),
             token,
             expression,
         })
+    }
+
+    pub fn get_node_id(&self) -> AstNodeIndex {
+        match self {
+            Statement::EmptyStatement { node_id, ..} => *node_id,
+            Statement::LetStatement(x) => x.node_id,
+            Statement::StaticStatement(x) => x.node_id,
+            Statement::ConstStatement(x) => x.node_id,
+            Statement::ExpressionStatement(x) => x.node_id,
+            Statement::WhileStatement(x) => x.node_id,
+            Statement::BreakStatement(x) => x.node_id,
+            Statement::ContinueStatement(x) => x.node_id,
+            Statement::FnStatement(x) => x.node_id,
+            Statement::ReturnStatement(x) => x.node_id,
+            Statement::DeferStatement(x) => x.node_id,
+            Statement::StructStatement(x) => x.node_id,
+            Statement::ImplStatement(x) => x.node_id,
+            Statement::IfElseStatement(x) => x.node_id,
+        }
     }
 }
 
 pub enum Ast {
     Expression(Expression),
     Statement(Statement)
+}
+
+impl Ast {
+    pub fn get_node_id(&self) -> AstNodeIndex {
+        match self {
+            Self::Expression(x) => x.get_node_id(),
+            Self::Statement(x) => x.get_node_id(),
+        }
+    }
 }

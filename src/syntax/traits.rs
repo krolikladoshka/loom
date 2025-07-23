@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::ops::Deref;
-use crate::syntax::ast::{Binary, Cast, Expression, ExpressionStatement, FnStatement, Function, Grouping, Identifier, ImplFunction, ImplStatement, Literal, Method, PointerAnnotation, ReturnStatement, Statement, StructInitializer, StructStatement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
+use crate::syntax::ast::{Binary, Cast, Expression, ExpressionStatement, FnStatement, Function, Grouping, Identifier, ImplFunction, ImplStatement, Literal, LiteralNode, Method, PointerAnnotation, ReturnStatement, Statement, StructInitializer, StructStatement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
 // use crate::syntax::ast::Expression::{Binary, Cast, Grouping, Identifier, StructInitializer};
 // use crate::syntax::ast::Literal::{Bool, Char, MultilineString, F32, F64, I16, I32, I64, I8, U16, U32, U64, U8};
 // use crate::syntax::ast::Statement::{EmptyStatement, ExpressionStatement, FnStatement, ImplStatement, ReturnStatement, StructStatement};
@@ -107,6 +107,14 @@ impl PartialTreeEq for Literal {
             ) => at.partial_eq(bt) && av == bv,
             _ => false,
         }
+    }
+}
+
+impl PartialTreeEq for LiteralNode {
+    type Other = LiteralNode;
+
+    fn partial_eq(&self, other: &Self::Other) -> bool {
+        self.literal.partial_eq(&other.literal)
     }
 }
 
@@ -400,8 +408,8 @@ impl PartialTreeEq for Statement {
 
         match (self, other) {
             (
-                EmptyStatement { semicolon_token: a },
-                EmptyStatement { semicolon_token: b}
+                EmptyStatement { semicolon_token: a, .. },
+                EmptyStatement { semicolon_token: b, ..}
             ) => a.partial_eq(b),
             (
                 StructStatement(a),

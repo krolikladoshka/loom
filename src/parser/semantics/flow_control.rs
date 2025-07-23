@@ -1,3 +1,4 @@
+use crate::compiler::c_transpiler::CTranspilerContext;
 use crate::parser::semantics::traits::{AstContext, Semantics};
 use crate::syntax::ast::{BreakStatement, ContinueStatement, DeferStatement, FnStatement, ImplFunction, ImplStatement, ReturnStatement, SelfExpression, WhileStatement};
 use crate::syntax::lexer::Token;
@@ -50,7 +51,8 @@ pub struct FirstSemanticsPassContext {
     // pub resolved_variables: HashMap<String, Identifier>,
     // pub scopes: Vec<Scope>,
     // pub transformed_ast: HashMap<usize, TransformedAstNode>
-    flow_control: FlowControlContext,
+    pub flow_control: FlowControlContext,
+    pub transpile: CTranspilerContext,
 }
 
 impl AstContext for FirstSemanticsPassContext { type Output = (); }

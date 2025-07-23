@@ -1,5 +1,5 @@
 // TODO: do something with formatter and linter to wrap uses to new lines or use use stmt per line
-use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplStatement, InplaceAssignment, LetStatement, Literal, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, Unary, WhileStatement};
+use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplStatement, InplaceAssignment, LetStatement, Literal, LiteralNode, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, Unary, WhileStatement};
 use crate::syntax::lexer::Token;
 
 pub trait AstContext: Default {
@@ -41,9 +41,13 @@ where
                 self.analyze_if_else_statement(if_else_statement, context),
         }
     }
-
+    
     fn analyze_statement(&self, statement: &Statement, context: &mut SharedContext) {
         self.analyze_statement_default(statement, context)
+    }
+
+    fn analyze_next(&self, statement: &Statement, context: &mut SharedContext) {
+        self.analyze_statement(statement, context)
     }
 
     fn analyze_all_statements(
@@ -54,6 +58,17 @@ where
     {
         for statement in statements {
             self.analyze_statement(statement, context);
+        }
+    }
+    
+    fn analyze_all_expressions(
+        &self,
+        expressions: &Vec<Expression>,
+        context: &mut SharedContext,
+    )
+    {
+        for expression in expressions {
+            self.analyze_expression(expression, context);
         }
     }
 
@@ -159,7 +174,7 @@ where
                 self.analyze_literal(literal, context),
             Expression::Identifier(identifier) =>
                 self.analyze_identifier(identifier, context),
-            Expression::MethodCall() => {}
+            Expression::MethodCall { .. } => {}
             // self.analyze_method_call(method_call, context),
             Expression::DotSet { .. } => {}
             Expression::ArrowSet { .. } => {}
@@ -211,7 +226,7 @@ where
 
     fn analyze_literal(
         &self,
-        _literal: &Literal,
+        _literal: &LiteralNode,
         _context: &mut SharedContext,
     ) {}
 
