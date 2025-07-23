@@ -4,8 +4,15 @@
 #include <stdlib.h>
 
 // for arenas
-#ifndef m_kilobytes(amount) ((usize)(((usize)amount) * 1024))
-#ifndef m_megabytes(amount) ((usize)((m_kilobytes((amount)) * 1024))
+#ifndef m_kilobytes
+#define m_kilobytes(amount) ((usize)(((usize)amount) * 1024))
+#endif
+
+
+#ifndef m_megabytes
+#define m_megabytes(amount) ((usize)((m_kilobytes((amount)) * 1024))
+#endif
+
 
 inline u8* def_malloc(usize size) {
     u8* memory = (u8*) malloc(size);

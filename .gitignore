@@ -1,3 +1,5 @@
 /target
 .idea/
 road.txt
+resources/transpiled.c
+resources/example.rs
