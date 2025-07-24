@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::Add;
+use std::os::unix::raw::off_t;
 use crate::parser::errors::ParserError;
 use crate::parser::parser::Parser;
 use crate::parser::semantics::flow_control::FirstSemanticsPassContext;
@@ -31,8 +32,8 @@ impl CTranspilerContext {
     }
 
     #[inline(always)]
-    pub fn get_transpile_result(&self, idx: &AstNodeIndex) -> &String {
-        &self.transpile_results[idx]
+    pub fn get_transpile_result(&self, idx: &AstNodeIndex) -> Option<&String> {
+        self.transpile_results.get(idx)
     }
 }
 
@@ -57,7 +58,7 @@ impl CTranspilerSemantics {
         context: &mut FirstSemanticsPassContext,
     ) -> Vec<String>
     {
-        self.analyze_all_statements(statements, context);
+        self.visit_all_statements(statements, context);
 
         // println!("{:?}", context.transpile.transpile_results.keys());
 
@@ -81,25 +82,58 @@ impl CTranspilerSemantics {
         context: &mut FirstSemanticsPassContext,
     ) -> Vec<String>
     {
-        self.analyze_all_expressions(expressions, context);
+        self.visit_all_expressions(expressions, context);
 
         expressions.iter()
             .map(|e| self.get_transpiled_expr(e, context).clone())
             .collect::<Vec<String>>()
     }
 
+    fn get_all_transpiled_statements(
+        &self, statements: &[Statement],
+        context: &mut FirstSemanticsPassContext
+    ) -> Vec<String>
+    {
+        statements.iter()
+            .map(|s| self.get_transpiled_statement(s, context).clone())
+            .collect::<Vec<String>>()
+    }
 
+    fn get_all_transpiled_exprs(
+        &self, exprs: &[Expression],
+        context: &mut FirstSemanticsPassContext
+    ) -> Vec<String>
+    {
+        exprs.iter()
+            .map(|s| self.get_transpiled_expr(s, context).clone())
+            .collect::<Vec<String>>()
+    }
+
+    #[inline(always)]
+    fn try_get_transpiled<'a>(
+        &self, ast: &Ast, context: &'a mut FirstSemanticsPassContext,
+    ) -> Option<&'a String> {
+        context.transpile.get_transpile_result(&ast.get_node_id())
+    }
+    
     #[inline(always)]
     fn get_transpiled<'a>(
         &self, ast: &Ast, context: &'a mut FirstSemanticsPassContext
     ) -> &'a String {
-        context.transpile.get_transpile_result(&ast.get_node_id())
+        context.transpile.get_transpile_result(&ast.get_node_id()).unwrap()
     }
 
     #[inline(always)]
     fn get_transpiled_statement<'a>(
         &self, stmt: &Statement, context: &'a mut FirstSemanticsPassContext
     ) -> &'a String {
+        context.transpile.get_transpile_result(&stmt.get_node_id()).unwrap()
+    }
+
+    #[inline(always)]
+    fn try_get_transpiled_statement<'a>(
+        &self, stmt: &Statement, context: &'a mut FirstSemanticsPassContext
+    ) -> Option<&'a String> {
         context.transpile.get_transpile_result(&stmt.get_node_id())
     }
 
@@ -107,6 +141,13 @@ impl CTranspilerSemantics {
     fn get_transpiled_expr<'a>(
         &self, expr: &Expression, context: &'a mut FirstSemanticsPassContext
     ) -> &'a String {
+        context.transpile.get_transpile_result(&expr.get_node_id()).unwrap()
+    }
+
+    #[inline(always)]
+    fn try_get_transpiled_expr<'a>(
+        &self, expr: &Expression, context: &'a mut FirstSemanticsPassContext
+    ) -> Option<&'a String> {
         context.transpile.get_transpile_result(&expr.get_node_id())
     }
 
@@ -157,6 +198,7 @@ impl CTranspilerSemantics {
         &self, function: &ImplFunction, prefix: String,
         context: &mut FirstSemanticsPassContext,
     ) -> String {
+        // TODO: rewrite when namespacing model is chosen
         let mut result = String::new();
 
         match function {
@@ -242,30 +284,30 @@ impl CTranspilerSemantics {
 }
 
 impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
-    fn analyze_statement(&self, statement: &Statement, context: &mut FirstSemanticsPassContext) {
+    fn visit_statement(&self, statement: &Statement, context: &mut FirstSemanticsPassContext) {
         use Statement::*;
 
         match statement {
             FnStatement(function) =>
-                self.analyze_fn_statement(function, context),
+                self.visit_fn_statement(function, context),
             ExpressionStatement(expression) =>
-                self.analyze_expression_statement(expression, context),
+                self.visit_expression_statement(expression, context),
             WhileStatement(while_statement) =>
-                self.analyze_while_statement(while_statement, context),
+                self.visit_while_statement(while_statement, context),
             LetStatement(let_statement) =>
-                self.analyze_let_statement(let_statement, context),
+                self.visit_let_statement(let_statement, context),
             IfElseStatement(if_else_statement) =>
-                self.analyze_if_else_statement(if_else_statement, context),
+                self.visit_if_else_statement(if_else_statement, context),
             ReturnStatement(return_statement) =>
-                self.analyze_return_statement(return_statement, context),
+                self.visit_return_statement(return_statement, context),
             StructStatement(struct_statement) =>
-                self.analyze_struct_statement(struct_statement, context),
+                self.visit_struct_statement(struct_statement, context),
             BreakStatement(break_statement) =>
-                self.analyze_break_statement(break_statement, context),
+                self.visit_break_statement(break_statement, context),
             ContinueStatement(continue_statement) =>
-                self.analyze_continue_statement(continue_statement, context),
+                self.visit_continue_statement(continue_statement, context),
             ImplStatement(impl_function) =>
-                self.analyze_impl_statement(impl_function, context),
+                self.visit_impl_statement(impl_function, context),
             stmt => {
                 self.fallback_transpile(stmt, context);
             }
@@ -273,38 +315,94 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
         }
     }
 
-    fn analyze_impl_statement(
-        &self, impl_statement: &ImplStatement,
-        context: &mut FirstSemanticsPassContext
+    fn visit_next(&self, statement: &Statement, context: &mut FirstSemanticsPassContext) {
+        self.visit_statement(statement, context);
+
+        let transpiled = self.get_transpiled_statement(statement, context).clone();
+        context.transpile.result.push_str(
+            transpiled.as_str()
+        );
+        context.transpile.result.push_str("\n\n");
+    }
+
+    fn visit_let_statement(
+        &self, let_statement: &LetStatement, context: &mut FirstSemanticsPassContext
     )
     {
-        let impl_prefix = impl_statement.implemented_type.literal.clone();
-        let mut transpiled_declarations = vec![];
-        for top_level_statement in &impl_statement.top_level_statements {
-            self.analyze_statement(top_level_statement, context);
-            let transpiled_declaration = self.get_transpiled_statement(
-                top_level_statement, context
-            );
+        self.visit_let_statement_default(let_statement, context);
+        
+        let mut result = String::default();
 
-            transpiled_declarations.push(transpiled_declaration.clone());
+        if let Some(t) = &let_statement.variable_type {
+            let annotation = self.transpile_type_annotation(&t);
+            result.push_str(annotation.as_str());
+        } else {
+            result.push_str("void*");
         }
 
-        for function in &impl_statement.functions {
-            let transpiled_function = self.transpile_function(
-                function, impl_prefix.clone(), context
-            );
-            transpiled_declarations.push(transpiled_function);
+        result.push(' ');
+        result.push_str(let_statement.name.lexeme.as_str());
+        
+        
+        if let Some(initializer) = &let_statement.initializer {
+            result.push_str(" = ");
+
+            let expression = self.get_transpiled_expr(initializer, context).clone();
+
+            result.push_str(expression.as_str());
         }
 
-        let result = transpiled_declarations.join("\n\t");
+        result.push(';');
 
         context.transpile.set_transpile_result(
-            impl_statement.node_id,
+            let_statement.node_id,
             result
         );
     }
 
-    fn analyze_break_statement(
+    fn visit_expression_statement(
+        &self, statement: &ExpressionStatement,
+        context: &mut FirstSemanticsPassContext
+    )
+    {
+        self.visit_expression_statement_default(statement, context);
+        
+        let mut transpiled = self.get_transpiled_expr(
+            &statement.expression, context
+        ).clone();
+
+        transpiled.push(';');
+
+        context.transpile.set_transpile_result(
+            statement.node_id,
+            transpiled
+        )
+    }
+
+    fn visit_while_statement(&self, while_statement: &WhileStatement, context: &mut FirstSemanticsPassContext) {
+        self.visit_while_statement_default(while_statement, context);
+        
+        let mut result = String::from("while (");
+        let condition = self.get_transpiled_expr(
+            &while_statement.condition, context
+        );
+        result.push_str(condition);
+        result.push_str(") {\n\t");
+        
+        let body = self.get_all_transpiled_statements(
+            &while_statement.body, context
+        ).join("\n\t");
+
+        result.push_str(body.as_str());
+        result.push_str("\n\t}\n");
+
+        context.transpile.set_transpile_result(
+            while_statement.node_id,
+            result
+        )
+    }
+    
+    fn visit_break_statement(
         &self, break_statement: &BreakStatement,
         context: &mut FirstSemanticsPassContext
     )
@@ -315,7 +413,7 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
         );
     }
 
-    fn analyze_continue_statement(
+    fn visit_continue_statement(
         &self, continue_statement: &ContinueStatement,
         context: &mut FirstSemanticsPassContext
     )
@@ -325,8 +423,50 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
             "continue;".to_string()
         )
     }
+    fn visit_fn_statement(
+        &self,
+        statement: &FnStatement,
+        context: &mut FirstSemanticsPassContext
+    )
+    {
+        // let mut result = String::new();
+        let result = self.transpile_function(
+            &statement.function, String::new(), context
+        );
 
-    fn analyze_struct_statement(
+        context.transpile.set_transpile_result(
+            statement.node_id,
+            result
+        )
+    }
+
+    fn visit_return_statement(
+        &self, return_statement: &ReturnStatement,
+        context: &mut FirstSemanticsPassContext
+    )
+    {
+        self.visit_return_statement_default(return_statement, context);
+        
+        let mut result = String::from("return");
+
+        if let Some(return_expression) = &return_statement.expression {
+            let return_expr = self.get_transpiled_expr(
+                &return_expression, context
+            );
+
+            result.push(' ');
+            result.push_str(return_expr.as_str());
+        }
+
+        result.push(';');
+        context.transpile.set_transpile_result(
+            return_statement.node_id,
+            result
+        );
+    }
+
+
+    fn visit_struct_statement(
         &self, struct_statement: &StructStatement,
         context: &mut FirstSemanticsPassContext
     )
@@ -351,43 +491,54 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
             result
         );
     }
-    fn analyze_return_statement(
-        &self, return_statement: &ReturnStatement,
+
+    fn visit_impl_statement(
+        &self, impl_statement: &ImplStatement,
         context: &mut FirstSemanticsPassContext
     )
     {
-        let mut result = String::from("return");
-
-        if let Some(return_expression) = &return_statement.expression {
-            self.analyze_expression(return_expression, context);
-            let return_expr = self.get_transpiled_expr(
-                &return_expression, context
+        let impl_prefix = impl_statement.implemented_type.literal.clone();
+        let mut transpiled_declarations = vec![];
+        for top_level_statement in &impl_statement.top_level_statements {
+            self.visit_statement(top_level_statement, context);
+            let transpiled_declaration = self.get_transpiled_statement(
+                top_level_statement, context
             );
 
-            result.push(' ');
-            result.push_str(return_expr.as_str());
+            transpiled_declarations.push(transpiled_declaration.clone());
         }
 
-        result.push(';');
+        for function in &impl_statement.functions {
+            let transpiled_function = self.transpile_function(
+                function, impl_prefix.clone(), context
+            );
+            transpiled_declarations.push(transpiled_function);
+        }
+
+        let result = transpiled_declarations.join("\n\t");
+
         context.transpile.set_transpile_result(
-            return_statement.node_id,
+            impl_statement.node_id,
             result
         );
     }
 
-    fn analyze_if_else_statement(
+    fn visit_if_else_statement(
         &self, if_else: &IfElseStatement, context: &mut FirstSemanticsPassContext
     )
     {
-        self.analyze_expression(&if_else.condition, context);
-        let then_branch = self.transpile_all(&if_else.then_branch, context)
+        self.visit_if_else_statement_default(if_else, context);
+        
+        let condition = self.get_transpiled_expr(&if_else.condition, context).clone();
+        let then_branch = self.get_all_transpiled_statements(&if_else.then_branch, context)
             .join("\n\t");
-
-        let condition = self.get_transpiled_expr(&if_else.condition, context);
+        
         let mut result = format!("if ({}) {{\n\t{}\n\t}}", condition, then_branch);
+        
         if let Some(else_branch) = &if_else.else_branch {
-            let else_branch = self.transpile_all(else_branch, context)
-                .join("\n\t");
+            let else_branch = self.get_all_transpiled_statements(
+                else_branch, context
+            ).join("\n\t");
 
             result.push_str(format!(" else {{\n\t{}\n\t}}", else_branch).as_str());
         }
@@ -397,126 +548,8 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
             result,
         );
     }
-    fn analyze_call(&self, call: &Call, context: &mut FirstSemanticsPassContext) {
-        self.analyze_expression(call.callee.as_ref(), context);
-        let args = self.transpile_all_exprs(&call.arguments, context);
 
-        let mut result = String::with_capacity(4);
-
-        let callee = self.get_transpiled_expr(call.callee.as_ref(), context);
-        result.push_str(callee);
-        result.push('(');
-        result.push_str(args.join(", ").as_str());
-        result.push(')');
-
-        context.transpile.set_transpile_result(
-            call.node_id,
-            result
-        )
-    }
-
-    fn analyze_let_statement(
-        &self, let_statement: &LetStatement, context: &mut FirstSemanticsPassContext
-    )
-    {
-        let mut result = String::default();
-
-        if let Some(t) = &let_statement.variable_type {
-            let annotation = self.transpile_type_annotation(&t);
-            result.push_str(annotation.as_str());
-        } else {
-            result.push_str("void*");
-        }
-
-        result.push(' ');
-        result.push_str(let_statement.name.lexeme.as_str());
-
-        if let Some(initializer) = &let_statement.initializer {
-            result.push_str(" = ");
-            self.analyze_expression(initializer.as_ref(), context);
-
-            let expression = self.get_transpiled_expr(initializer, context).clone();
-
-            result.push_str(expression.as_str());
-        }
-
-        result.push(';');
-
-        context.transpile.set_transpile_result(
-            let_statement.node_id,
-            result
-        );
-    }
-
-
-    fn analyze_next(&self, statement: &Statement, context: &mut FirstSemanticsPassContext) {
-        self.analyze_statement(statement, context);
-
-        let transpiled = self.get_transpiled_statement(statement, context).clone();
-        context.transpile.result.push_str(
-            transpiled.as_str()
-        );
-        context.transpile.result.push_str("\n\n");
-    }
-
-    fn analyze_expression_statement(
-        &self, statement: &ExpressionStatement,
-        context: &mut FirstSemanticsPassContext
-    )
-    {
-        self.analyze_expression(&statement.expression, context);
-        let mut transpiled = self.get_transpiled_expr(
-            &statement.expression, context
-        ).clone();
-
-        transpiled.push(';');
-
-        context.transpile.set_transpile_result(
-            statement.node_id,
-            transpiled
-        )
-    }
-
-    fn analyze_while_statement(&self, while_statement: &WhileStatement, context: &mut FirstSemanticsPassContext) {
-        let mut result = String::from("while (");
-        self.analyze_expression(&while_statement.condition, context);
-
-        let condition = context.transpile.get_transpile_result(
-            &while_statement.condition.get_node_id()
-        );
-        result.push_str(condition.as_str());
-        result.push_str(") {\n\t");
-
-        let body = self.transpile_all(&while_statement.body, context)
-            .join("\n\t");
-
-        result.push_str(body.as_str());
-        result.push_str("\n\t}\n");
-
-        context.transpile.set_transpile_result(
-            while_statement.node_id,
-            result
-        )
-    }
-
-    fn analyze_fn_statement(
-        &self,
-        statement: &FnStatement,
-        context: &mut FirstSemanticsPassContext
-    )
-    {
-        // let mut result = String::new();
-        let result = self.transpile_function(
-            &statement.function, String::new(), context
-        );
-
-        context.transpile.set_transpile_result(
-            statement.node_id,
-            result
-        )
-    }
-
-    fn analyze_expression(
+    fn visit_expression(
         &self, expression: &Expression, context: &mut FirstSemanticsPassContext
     )
     {
@@ -525,30 +558,30 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
 
         match expression {
             Assignment(assignment) => {
-                self.analyze_assignment(assignment, context);
+                self.visit_assignment(assignment, context);
             },
             InplaceAssignment(assignment) =>
-                self.analyze_inplace_assignment(assignment, context),
+                self.visit_inplace_assignment(assignment, context),
             Binary(binary) =>
-                self.analyze_binary(binary, context),
+                self.visit_binary(binary, context),
             Unary(unary) =>
-                self.analyze_unary(unary, context),
+                self.visit_unary(unary, context),
             Literal(lit) =>
-                self.analyze_literal(lit, context),
+                self.visit_literal(lit, context),
             Call(call) =>
-                self.analyze_call(call, context),
+                self.visit_call(call, context),
             ArrowAccess(access) =>
-                self.analyze_arrow_access(access, context),
+                self.visit_arrow_access(access, context),
             DotAccess(dot_access) =>
-                self.analyze_dot_access(dot_access, context),
+                self.visit_dot_access(dot_access, context),
             Identifier(identifier) =>
-                self.analyze_identifier(identifier, context),
+                self.visit_identifier(identifier, context),
             Cast(cast) =>
-                self.analyze_cast(cast, context),
+                self.visit_cast(cast, context),
             SelfExpression(expression) =>
-                self.analyze_self(expression, context),
+                self.visit_self(expression, context),
             Grouping(grouping) =>
-                self.analyze_grouping(grouping, context),
+                self.visit_grouping(grouping, context),
             _ => {
                 context.transpile.set_transpile_result(
                     expression.get_node_id(),
@@ -564,27 +597,17 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
         context.transpile.set_transpile_result(expression.get_node_id(), result);
     }
 
-    fn analyze_self(
-        &self, self_expression: &SelfExpression,
-        context: &mut FirstSemanticsPassContext
-    )
-    {
-        context.transpile.set_transpile_result(
-            self_expression.node_id,
-            "self".to_string()
-        )
-    }
-
-    fn analyze_grouping(
+    fn visit_grouping(
         &self, grouping: &Grouping,
         context: &mut FirstSemanticsPassContext
     )
     {
-        self.analyze_expression(&grouping.expression, context);
+        self.visit_grouping_default(grouping, context);
+
         let result = self.get_transpiled_expr(
-            &grouping.expression, context 
+            &grouping.expression, context
         ).clone();
-        
+
         context.transpile.set_transpile_result(
             grouping.node_id,
             format!(
@@ -592,91 +615,8 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
             )
         )
     }
-    
-    fn analyze_cast(&self, cast: &Cast, context: &mut FirstSemanticsPassContext) {
-        self.analyze_expression(&cast.left,  context);
-        let type_annotation = self.transpile_type_annotation(&cast.target_type);
 
-        let cast_transpiled = self.get_transpiled_expr(&cast.left, context);
-        let result = format!("({})({})", type_annotation, cast_transpiled);
-
-        context.transpile.set_transpile_result(
-            cast.node_id,
-            result
-        )
-    }
-    fn analyze_arrow_access(
-        &self, arrow_access: &ArrowAccess, context: &mut FirstSemanticsPassContext
-    ) {
-        self.analyze_expression(&arrow_access.pointer, context);
-        let mut result = String::with_capacity(4 + arrow_access.name.lexeme.len());
-        let pointer = self.get_transpiled_expr(
-            &arrow_access.pointer, context
-        );
-        result.push_str(pointer.as_str());
-        result.push_str("->");
-        result.push_str(arrow_access.name.lexeme.as_str());
-
-        context.transpile.set_transpile_result(
-            arrow_access.node_id,
-            result
-        );
-    }
-
-    fn analyze_dot_access(
-        &self, dot_access: &DotAccess, context: &mut FirstSemanticsPassContext
-    ) {
-        self.analyze_expression(&dot_access.object, context);
-        let mut result = String::with_capacity(3 + dot_access.name.lexeme.len());
-        let pointer = self.get_transpiled_expr(
-            &dot_access.object, context
-        );
-        result.push_str(pointer.as_str());
-        result.push_str(".");
-        result.push_str(dot_access.name.lexeme.as_str());
-
-        context.transpile.set_transpile_result(
-            dot_access.node_id,
-            result
-        );
-    }
-
-    fn analyze_identifier(
-        &self, identifier: &Identifier, context: &mut FirstSemanticsPassContext
-    )
-    {
-        context.transpile.set_transpile_result(
-            identifier.node_id,
-            identifier.name.literal.clone()
-        )
-    }
-
-    fn analyze_inplace_assignment(
-        &self, inplace_assignment: &InplaceAssignment, context: &mut FirstSemanticsPassContext
-    )
-    {
-        self.analyze_expression(&inplace_assignment.lhs, context);
-        self.analyze_expression(&inplace_assignment.rhs, context);
-
-        let lhs = self.get_transpiled_expr(
-            &inplace_assignment.lhs, context
-        ).clone();
-        let rhs = self.get_transpiled_expr(
-            &inplace_assignment.rhs, context
-        );
-
-        let mut result = String::new();
-        result.push_str(lhs.as_str());
-        result.push_str(format!(" {} ",inplace_assignment.operator.lexeme).as_str());
-        result.push_str(rhs);
-
-        context.transpile.set_transpile_result(
-            inplace_assignment.node_id,
-            result
-        );
-    }
-
-    fn analyze_literal(&self, literal: &LiteralNode, context: &mut FirstSemanticsPassContext) {
+    fn visit_literal(&self, literal: &LiteralNode, context: &mut FirstSemanticsPassContext) {
         use crate::syntax::ast::Literal::*;
 
         let lit_str = match &literal.literal {
@@ -733,10 +673,78 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
         );
     }
 
-    fn analyze_unary(&self, unary: &Unary, context: &mut FirstSemanticsPassContext) {
+    fn visit_identifier(
+        &self, identifier: &Identifier, context: &mut FirstSemanticsPassContext
+    )
+    {
+        context.transpile.set_transpile_result(
+            identifier.node_id,
+            identifier.name.literal.clone()
+        )
+    }
+
+    fn visit_dot_access(
+        &self, dot_access: &DotAccess, context: &mut FirstSemanticsPassContext
+    ) {
+        self.visit_dot_access_default(dot_access, context);
+
+        let mut result = String::with_capacity(3 + dot_access.name.lexeme.len());
+        let pointer = self.get_transpiled_expr(
+            &dot_access.object, context
+        );
+        result.push_str(pointer.as_str());
+        result.push_str(".");
+        result.push_str(dot_access.name.lexeme.as_str());
+
+        context.transpile.set_transpile_result(
+            dot_access.node_id,
+            result
+        );
+    }
+
+    fn visit_arrow_access(
+        &self, arrow_access: &ArrowAccess, context: &mut FirstSemanticsPassContext
+    ) {
+        self.visit_arrow_access_default(arrow_access, context);
+
+        let mut result = String::with_capacity(4 + arrow_access.name.lexeme.len());
+        let pointer = self.get_transpiled_expr(
+            &arrow_access.pointer, context
+        );
+        result.push_str(pointer.as_str());
+        result.push_str("->");
+        result.push_str(arrow_access.name.lexeme.as_str());
+
+        context.transpile.set_transpile_result(
+            arrow_access.node_id,
+            result
+        );
+    }
+
+    fn visit_call(&self, call: &Call, context: &mut FirstSemanticsPassContext) {
+        self.visit_call_default(call, context);
+        
+        let mut result = String::with_capacity(4);
+
+        let callee = self.get_transpiled_expr(call.callee.as_ref(), context);
+        result.push_str(callee);
+        result.push('(');
+        
+        let args = self.get_all_transpiled_exprs(&call.arguments, context);
+        result.push_str(args.join(", ").as_str());
+        result.push(')');
+
+        context.transpile.set_transpile_result(
+            call.node_id,
+            result
+        )
+    }
+
+    fn visit_unary(&self, unary: &Unary, context: &mut FirstSemanticsPassContext) {
         let mut result = String::from(unary.operator.lexeme.as_str());
 
-        self.analyze_expression(&unary.expression, context);
+        self.visit_unary_default(unary, context);
+
         let expr = self.get_transpiled_expr(&unary.expression, context);
 
         result.push_str(expr.as_str());
@@ -747,14 +755,28 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
         )
     }
 
-    fn analyze_binary(&self, binary: &Binary, context: &mut FirstSemanticsPassContext) {
-        self.analyze_expression(&binary.left, context);
+    fn visit_cast(&self, cast: &Cast, context: &mut FirstSemanticsPassContext) {
+        self.visit_cast_default(cast, context);
+
+        let type_annotation = self.transpile_type_annotation(&cast.target_type);
+
+        let cast_transpiled = self.get_transpiled_expr(&cast.left, context);
+        let result = format!("({})({})", type_annotation, cast_transpiled);
+
+        context.transpile.set_transpile_result(
+            cast.node_id,
+            result
+        )
+    }
+
+    fn visit_binary(&self, binary: &Binary, context: &mut FirstSemanticsPassContext) {
+        self.visit_binary_default(binary, context);
+
         let mut left = self.get_transpiled_expr(&binary.left, context).clone();
         left.push(' ');
         left.push_str(&binary.operator.lexeme.to_string());
         left.push(' ');
 
-        self.analyze_expression(&binary.right, context);
         let right = self.get_transpiled_expr(&binary.right, context);
         left.push_str(right);
 
@@ -764,20 +786,54 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
         )
     }
 
-    fn analyze_assignment(
+    fn visit_inplace_assignment(
+        &self, inplace_assignment: &InplaceAssignment, context: &mut FirstSemanticsPassContext
+    )
+    {
+        self.visit_inplace_assignment_default(inplace_assignment, context);
+
+        let lhs = self.get_transpiled_expr(
+            &inplace_assignment.lhs, context
+        ).clone();
+        let rhs = self.get_transpiled_expr(
+            &inplace_assignment.rhs, context
+        );
+
+        let mut result = String::new();
+        result.push_str(lhs.as_str());
+        result.push_str(format!(" {} ",inplace_assignment.operator.lexeme).as_str());
+        result.push_str(rhs);
+
+        context.transpile.set_transpile_result(
+            inplace_assignment.node_id,
+            result
+        );
+    }
+
+    fn visit_assignment(
         &self, assignment: &Assignment, context: &mut FirstSemanticsPassContext
     )
     {
-        self.analyze_expression(&assignment.lhs, context);
+        self.visit_assignment_default(assignment, context);
 
         let mut lhs = self.get_transpiled_expr(&assignment.lhs, context).clone();
         lhs.push_str(" = ");
 
-        self.analyze_expression(&assignment.rhs, context);
         let rhs = self.get_transpiled_expr(&assignment.rhs, context);
         lhs.push_str(rhs.as_str());
 
         context.transpile.set_transpile_result(assignment.node_id, lhs);
+    }
+
+    fn visit_self(
+        &self, self_expression: &SelfExpression,
+        context: &mut FirstSemanticsPassContext
+    )
+    {
+        context.transpile.set_transpile_result(
+            self_expression.node_id,
+            "self".to_string()
+        )
     }
 }
 

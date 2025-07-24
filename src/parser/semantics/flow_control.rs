@@ -29,6 +29,9 @@ pub struct FlowControlContext {
     pub previous_block_type: BlockType,
     temp_current_block_type: BlockType,
     pub current_block_type: BlockType,
+    
+    impl_and_top_level_block_type: BlockType,
+    function_scope_block_type: BlockType,
 }
 
 impl FlowControlContext {
@@ -91,8 +94,8 @@ impl FlowControlSemantics {
         keyword: &Token,
     )
     {
-        if context.flow_control.current_block_type != BlockType::Function &&
-            context.flow_control.current_block_type != BlockType::Method
+        if context.flow_control.function_scope_block_type != BlockType::Function &&
+            context.flow_control.function_scope_block_type != BlockType::Method
         {
             panic!("{} statement outside of function", keyword);
         }
@@ -118,10 +121,28 @@ impl FlowControlSemantics {
             |ctx| {
                 match &function {
                     ImplFunction::Function(function) => {
-                        self.analyze_all_statements(&function.body, ctx);
+                        let temp = ctx.flow_control.function_scope_block_type;
+                        ctx.flow_control.function_scope_block_type = BlockType::Function;
+                        
+                        ctx.scope_block_type(
+                            BlockType::Function,
+                            |c| self.visit_all_statements(&function.body, c)
+                        );
+                        
+                        ctx.flow_control.function_scope_block_type = temp;
                     },
                     ImplFunction::Method(method) => {
-                        self.analyze_all_statements(&method.body, ctx);
+                        let temp = ctx.flow_control.function_scope_block_type;
+                        ctx.flow_control.function_scope_block_type = BlockType::Method;
+                        
+                        ctx.scope_block_type(
+                            BlockType::Method,
+                            |c| self.visit_all_statements(
+                                &method.body, c
+                            )
+                        );
+                        
+                        ctx.flow_control.function_scope_block_type = temp;
                     }
                 }
             }
@@ -130,7 +151,7 @@ impl FlowControlSemantics {
 }
 
 impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
-    fn analyze_while_statement(
+    fn visit_while_statement(
         &self,
         while_statement: &WhileStatement,
         context: &mut FirstSemanticsPassContext
@@ -139,30 +160,32 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         context.scope_block_type(
             BlockType::While,
             |ctx|
-                self.analyze_while_statement_default(while_statement, ctx)
+                self.visit_while_statement_default(while_statement, ctx)
         )
     }
 
-    fn analyze_break_statement(
-        &self, break_statement: &BreakStatement, context: &mut FirstSemanticsPassContext)
+    fn visit_break_statement(
+        &self, break_statement: &BreakStatement, context: &mut FirstSemanticsPassContext
+    )
     {
         self.check_if_within_loops(context, &break_statement.token);
     }
 
-    fn analyze_continue_statement(
-        &self, continue_statement: &ContinueStatement, context: &mut FirstSemanticsPassContext)
+    fn visit_continue_statement(
+        &self, continue_statement: &ContinueStatement, context: &mut FirstSemanticsPassContext
+    )
     {
         self.check_if_within_loops(context, &continue_statement.token);
     }
 
-    fn analyze_fn_statement(
+    fn visit_fn_statement(
         &self, fn_statement: &FnStatement, context: &mut FirstSemanticsPassContext
     )
     {
         self.analyze_impl_function(&fn_statement.function, context)
     }
 
-    fn analyze_return_statement(
+    fn visit_return_statement(
         &self, return_statement: &ReturnStatement,
         context: &mut FirstSemanticsPassContext
     )
@@ -174,7 +197,7 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         // }
     }
 
-    fn analyze_defer_statement(
+    fn visit_defer_statement(
         &self, defer_statement: &DeferStatement,
         context: &mut FirstSemanticsPassContext
     )
@@ -182,10 +205,12 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         self.check_if_within_function(context, &defer_statement.token);
     }
 
-    fn analyze_impl_statement(
+    fn visit_impl_statement(
         &self, impl_statement: &ImplStatement, context: &mut FirstSemanticsPassContext
     )
     {
+        let temp = context.flow_control.impl_and_top_level_block_type;
+        context.flow_control.impl_and_top_level_block_type = BlockType::Impl;
         context.scope_block_type(
             BlockType::Impl,
             |ctx| {
@@ -195,17 +220,18 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
                         self.analyze_impl_function(function, ctx);
                     })
             }
-        )
+        );
+        context.flow_control.impl_and_top_level_block_type = temp;
     }
 
-    fn analyze_self(
+    fn visit_self(
         &self,
         self_expression: &SelfExpression,
         context: &mut FirstSemanticsPassContext
     )
     {
         // todo: what if self is captured within nested closures?
-        if context.flow_control.current_block_type != BlockType::Method {
+        if context.flow_control.function_scope_block_type != BlockType::Method {
             panic!("{} outside of method", self_expression.token);
         }
     }

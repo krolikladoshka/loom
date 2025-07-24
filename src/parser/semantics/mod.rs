@@ -50,7 +50,7 @@ where
 
     pub fn analyze_next(&mut self, statement: &Statement, context: &mut SharedContext) {
         for analyzer in self.analyzers.iter() {
-            analyzer.analyze_next(statement, context);
+            analyzer.visit_next(statement, context);
         }
     }
 
