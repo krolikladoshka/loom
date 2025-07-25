@@ -1,5 +1,13 @@
 /target
 .idea/
+./**/*/.idea/
+./**/*/cmake*/
 road.txt
 resources/transpiled.c
 resources/example.rs
+./build/
+./**/*/build/
+./libdill/
+CMakeCache.txt
+cmake_install.cmake
+Makefile

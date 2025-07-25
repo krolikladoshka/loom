@@ -5,27 +5,27 @@
 
 // for arenas
 #ifndef m_kilobytes
-#define m_kilobytes(amount) ((usize)(((usize)amount) * 1024))
+#define m_kilobytes(amount) ((usize) (((usize) amount) * 1024))
 #endif
 
 
 #ifndef m_megabytes
-#define m_megabytes(amount) ((usize)((m_kilobytes((amount)) * 1024))
+#define m_megabytes(amount) ((usize) ( (m_kilobytes(1024)) * 1024) )
 #endif
 
 
-inline u8* def_malloc(usize size) {
+static inline u8* def_malloc(usize size) {
     u8* memory = (u8*) malloc(size);
 
     return memory;
 }
 
-inline void def_free(u8* memory) {
+static inline void def_free(u8* memory) {
     free(memory);
 }
 
 
-inline u8* sigblock_malloc(usize size) {
+static inline u8* sigblock_malloc(usize size) {
     // TODO: block signals & context switch
     u8* memory = def_malloc(size);
 
@@ -37,11 +37,11 @@ inline void sigblock_free(u8* memory) {
     def_free(memory);
 }
 
-inline u8* sigblock_realloc(void* memory, usize new_size) {
-    return (u8*) realloc(memory, *new_size);
+static inline u8* sigblock_realloc(void* memory, usize new_size) {
+    return (u8*) realloc(memory, new_size);
 }
 
-inline void memcopy(u8* to, const u8* buffer, usize buffer_size) {
+static inline void memcopy(u8* to, const u8* buffer, usize buffer_size) {
     for (u8* p = to; p < (buffer + buffer_size); ++p, ++buffer) {
         *p = *buffer;
     }

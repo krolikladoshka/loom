@@ -47,7 +47,7 @@ fn main() {
     // println!("{:?}", ast_context);
 
     // println!("{}", ast_context.transpile.result);
-    let mut file = File::create("./resources/transpiled.c").unwrap();
+    let mut file = File::create("./loom_runtime/main.c").unwrap();
     file.write_all(ast_context.transpile.result.as_bytes()).unwrap();
     file.flush().unwrap();
 

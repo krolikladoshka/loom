@@ -8,7 +8,7 @@ use crate::parser::semantics::traits::Semantics;
 use crate::syntax::ast::{ArrowAccess, Assignment, Ast, AstNodeIndex, Binary, BreakStatement, Call, Cast, ContinueStatement, DotAccess, Expression, ExpressionStatement, FnStatement, Function, Grouping, Identifier, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, Literal, LiteralNode, PointerAnnotation, ReturnStatement, SelfExpression, Statement, StructStatement, Type, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
 use crate::syntax::tokens::TokenType::Let;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct CTranspilerContext {
     transpiled_stack: Vec<String>,
     transpile_stack_index: Vec<usize>,
@@ -16,14 +16,30 @@ pub struct CTranspilerContext {
     pub result: String
 }
 
+impl Default for CTranspilerContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+
 impl CTranspilerContext {
     pub fn new() -> Self {
         Self {
             transpiled_stack: vec![],
             transpile_stack_index: vec![],
             transpile_results: HashMap::new(),
-            result: String::default(),
+            result: Self::generate_main_c_file(),
         }
+    }
+
+    fn generate_main_c_file() -> String {
+        let mut result = String::new();
+
+        result.push_str("#include <stdlib.h>\n");
+        result.push_str("#include \"loom_runtime.h\"\n");
+
+        result
     }
 
     #[inline(always)]
@@ -41,6 +57,7 @@ pub struct CTranspilerSemantics;
 
 ///// TODO!: I honestly can't understand whether the code is now shittier or more flexible
 impl CTranspilerSemantics {
+    fn add_main_c_file(&self, context: &mut CTranspilerContext) {}
     fn fallback_transpile(
         &self, statement: &Statement,
         context: &mut FirstSemanticsPassContext,
@@ -478,9 +495,10 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
 
         let fields = struct_statement.fields
             .iter()
-            .map(|td| self.transpile_typed_declaration(td))
+            .map(|td| self.transpile_typed_declaration(td) + ";")
             .collect::<Vec<String>>()
             .join("\n\t");
+        
         result.push_str(fields.as_str());
         result.push_str(
             format!("\n}} {};\n", struct_statement.name.literal).as_str()

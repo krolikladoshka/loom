@@ -1,6 +1,11 @@
 #ifndef LOOM_COMMON_H
 #define LOOM_COMMON_H
 
+#ifndef __HERE__
+#define __HERE__ (__FILE__ ":" #__LINE__)
+#endif
+
+
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -16,9 +21,11 @@ typedef double f64;
 typedef unsigned long long usize;
 typedef char* str;
 
+
 #ifndef m_namespace
 #   define m_namespace(namespace, identifier) namespace ## identifier
 #endif
+
 
 typedef struct str_t {
     char *data;

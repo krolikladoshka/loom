@@ -10,6 +10,15 @@ pub mod flow_control;
 pub mod constraints;
 pub mod traits;
 
+/*
+class SemanticsAnalyzer:
+    def __init__(self):
+        self.semantics = []
+       
+    def analyze_next(self):
+        for semantic in self.semantics:
+            semantic.analyze_next()
+ */
 
 pub struct SemanticsAnalyzer<'a, Ast, SharedContext>
 where
