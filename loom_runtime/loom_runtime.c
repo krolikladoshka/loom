@@ -1,5 +1,7 @@
 #include "loom_runtime.h"
 
+#include "utils.h"
+
 void init_loom_runtime() {
     loom_runtime = {0};
 
@@ -34,3 +36,26 @@ void free_loom_runtime() {
         free(loom_runtime->processors + i);
     }
 }
+
+coroutine_t* runtime_schedule(any_func_pointer_t func) {
+    coroutine_t* coroutine = coroutine_create(
+        __FILE__,
+        func,
+        0,
+        0
+    );
+
+    m_assert_null(coroutine, "runtime schedule coroutine_create");
+
+    usize queue_size = loom_runtime->global_queue.size;
+    // TODO: lock mutex?
+    coroutine_queue_append(&loom_runtime->global_queue, coroutine);
+
+    m_dev_assert(
+        loom_runtime->global_queue.size == (queue_size + 1),
+        "new coroutine wasn't added to global queue"
+    );
+
+    return coroutine;
+}
+

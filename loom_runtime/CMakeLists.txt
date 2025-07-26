@@ -19,6 +19,7 @@ add_executable(loom_runtime
         loom_memory.h
         loom_scheduler.c
         loom_runtime.c
+        utils.h
 )
 target_compile_options(loom_runtime PRIVATE
         -arch arm64

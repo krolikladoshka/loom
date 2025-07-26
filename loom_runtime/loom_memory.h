@@ -14,25 +14,29 @@
 #endif
 
 
-static inline u8* def_malloc(usize size) {
-    u8* memory = (u8*) malloc(size);
-
-    return memory;
+static inline void* def_malloc(usize size) {
+    return malloc(size);
 }
 
-static inline void def_free(u8* memory) {
+#ifndef def_malloc_u8
+#define def_malloc_u8(size) ((u8*) def_malloc((size)))
+#endif
+
+
+static inline void def_free(void* memory) {
     free(memory);
 }
 
 
 static inline u8* sigblock_malloc(usize size) {
     // TODO: block signals & context switch
+    sigblo
     u8* memory = def_malloc(size);
 
     return memory;
 }
 
-inline void sigblock_free(u8* memory) {
+inline void sigblock_free(void* memory) {
     // TODO: block signals & context switch
     def_free(memory);
 }

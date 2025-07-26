@@ -2,7 +2,7 @@
 .globl _loom_runtime_restore_context_arm64_darwin
 _loom_runtime_restore_context_arm64_darwin:
     mov x15,  x0
-
+    ;; TODO: probably sp & pc will be passed as function args in x1 x2
     ldr x16, [x15, #248] ;; sp
     ldr x17, [x15, #256] ;; pc
 

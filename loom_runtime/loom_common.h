@@ -20,7 +20,12 @@ typedef double f64;
 
 typedef unsigned long long usize;
 typedef char* str;
+typedef void* (*any_func_pointer_t)(...); // why
 
+typedef struct function_pointer_t {
+    void (*function)(void**);
+    usize args_sizes[];
+} dfunction_pointer_t;
 
 #ifndef m_namespace
 #   define m_namespace(namespace, identifier) namespace ## identifier

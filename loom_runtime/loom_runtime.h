@@ -27,6 +27,6 @@ static loom_runtime_t* loom_runtime;
 void init_loom_runtime();
 void free_loom_runtime();
 
-
+void loom_runtime_schedule_task(void* (*task)(void*), void* args);
 
 #endif //LOOM_RUNTIME_H
