@@ -1,6 +1,34 @@
 #include "loom_common.h"
 #include "loom_memory.h"
 
+
+void def_free(void* memory) {
+    free(memory);
+}
+
+
+void* sigblock_malloc(usize size) {
+    // TODO: block signals & context switch
+    u8* memory = def_malloc(size);
+
+    return memory;
+}
+
+void sigblock_free(void* memory) {
+    // TODO: block signals & context switch
+    def_free(memory);
+}
+
+void* sigblock_realloc(void* memory, usize new_size) {
+    return realloc(memory, new_size);
+}
+
+void memcopy(u8* to, const u8* buffer, usize buffer_size) {
+    for (u8* p = to; p < (buffer + buffer_size); ++p, ++buffer) {
+        *p = *buffer;
+    }
+}
+
 void dynarray_extend_capacity(dynarray_t * const dynarray, usize new_capacity) {
     if (dynarray->capacity == 0) {
         dynarray->data = sigblock_malloc(new_capacity);

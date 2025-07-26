@@ -23,33 +23,15 @@ static inline void* def_malloc(usize size) {
 #endif
 
 
-static inline void def_free(void* memory) {
-    free(memory);
-}
+void def_free(void* memory);
 
+void* sigblock_malloc(usize size);
 
-static inline u8* sigblock_malloc(usize size) {
-    // TODO: block signals & context switch
-    sigblo
-    u8* memory = def_malloc(size);
+void sigblock_free(void* memory);
 
-    return memory;
-}
+void* sigblock_realloc(void* memory, usize new_size);
 
-inline void sigblock_free(void* memory) {
-    // TODO: block signals & context switch
-    def_free(memory);
-}
-
-static inline u8* sigblock_realloc(void* memory, usize new_size) {
-    return (u8*) realloc(memory, new_size);
-}
-
-static inline void memcopy(u8* to, const u8* buffer, usize buffer_size) {
-    for (u8* p = to; p < (buffer + buffer_size); ++p, ++buffer) {
-        *p = *buffer;
-    }
-}
+void memcopy(u8* to, const u8* buffer, usize buffer_size);
 
 typedef struct dynarray_t {
     u8 *data;

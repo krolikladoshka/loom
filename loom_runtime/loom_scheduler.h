@@ -1,7 +1,14 @@
 #ifndef LOOM_SCHEDULER_H
 #define LOOM_SCHEDULER_H
 
+#include <pthread.h>
+#include <stdatomic.h>
+
+#include <semaphore.h>
+#include <signal.h>
+
 #include "loom_common.h"
+#include "utils.h"
 
 typedef struct thread_t thread_t;
 typedef struct scheduler_t scheduler_t;
@@ -20,12 +27,20 @@ typedef struct coroutine_queue_t coroutine_queue_t;
 #define REGISTERS_COUNT 31
 #endif
 
+extern void loom_runtime_save_context_arm64_darwin(
+    registers_t* from
+);
+
 extern void loom_runtime_restore_context_arm64_darwin(
-    coroutine_context_t* to
+    registers_t* to
 ) __attribute((noinline));
 
-#ifndef restore_context
-#define restore_context(x) loom_runtime_restore_context_arm64_darwin((x))
+#ifndef loom_save_context
+#define loom_save_context(x) loom_runtime_save_context_arm64_darwin((x))
+#endif
+
+#ifndef loom_restore_context
+#define loom_restore_context(x) loom_runtime_restore_context_arm64_darwin((x))
 #endif
 
 // inline void restore_context(coroutine_context_t* to) __attribute__((noreturn)) {
@@ -150,25 +165,44 @@ void coroutine_queue_reenqueue(coroutine_queue_t* queue);
 
 /** scheduler **/
 struct scheduler_t {
-    coroutine_t start_coroutine;
-
     coroutine_t* current;
 
     coroutine_queue_t* local_queue;
 };
 
+coroutine_t* scheduler_get_first_runnable(scheduler_t* scheduler);
 /** scheduler **/
 
 struct processor_t {};
 
+
+typedef enum thread_state_t {
+    ts_created = 0,
+    ts_idle = 1,
+    ts_running = 2,
+    ts_syscall = 3,
+    ts_dead = 3,
+} thread_state_t;
 
 typedef struct thread_t {
     usize time_quant_start;
 
     scheduler_t* scheduler; // local scheduler slice
     processor_t* processor;
+
+    coroutine_t* main_coroutine;
+    // todo: why my compiler doens't recognize atomic_int?
+    _Atomic(int) state;
+    sem_t idle_semaphore;
+    pthread_t pthread;
 } thread_t;
 
+void sigurg_block();
+void sigurg_unblock();
+void* loom_working_thread_main(void* self_raw) __attribute__((noinline, noreturn));
 
-
+void thread_switch_to_coroutine(
+    thread_t* thread, coroutine_t* from, coroutine_t* to
+)
+__attribute__((noinline, noreturn));
 #endif //LOOM_SCHEDULER_H
