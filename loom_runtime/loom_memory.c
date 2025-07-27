@@ -1,6 +1,8 @@
 #include "loom_common.h"
 #include "loom_memory.h"
 
+#include "loom_scheduler.h"
+
 
 void def_free(void* memory) {
     free(memory);
@@ -9,14 +11,28 @@ void def_free(void* memory) {
 
 void* sigblock_malloc(usize size) {
     // TODO: block signals & context switch
-    u8* memory = def_malloc(size);
+    sigset_t oldmask, block;
+    sigemptyset(&block);
+    sigaddset(&block, SIGURG);
+    pthread_sigmask(SIG_BLOCK, &block, &oldmask);
+
+    void* memory = def_malloc(size);
+
+    pthread_sigmask(SIG_SETMASK, &oldmask, NULL);
+
+    if (memory == 0) {
+        return 0;
+    }
+    memset(memory, 0, size);
 
     return memory;
 }
 
 void sigblock_free(void* memory) {
     // TODO: block signals & context switch
+    sigurg_block();
     def_free(memory);
+    sigurg_unblock();
 }
 
 void* sigblock_realloc(void* memory, usize new_size) {

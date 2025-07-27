@@ -3,7 +3,7 @@
 
 #include <pthread.h>
 #include <stdatomic.h>
-
+#include <dispatch/dispatch.h>
 #include <semaphore.h>
 #include <signal.h>
 
@@ -33,7 +33,7 @@ extern void loom_runtime_save_context_arm64_darwin(
 
 extern void loom_runtime_restore_context_arm64_darwin(
     registers_t* to
-) __attribute((noinline));
+) __attribute((noinline, noreturn));
 
 #ifndef loom_save_context
 #define loom_save_context(x) loom_runtime_save_context_arm64_darwin((x))
@@ -61,7 +61,7 @@ struct registers_t {
 };
 
 #ifndef DEFAULT_COROUTINE_STACK_SIZE
-#define DEFAULT_COROUTINE_STACK_SIZE m_kilobytes(8)
+#define DEFAULT_COROUTINE_STACK_SIZE m_kilobytes(16)
 #endif
 
 struct coroutine_stack_t {
@@ -74,6 +74,12 @@ struct coroutine_stack_t {
 
 coroutine_stack_t* coroutine_stack_create();
 void coroutine_stack_free(coroutine_stack_t* stack);
+void coroutine_stack_copy_args(
+    coroutine_stack_t* stack,
+    usize args_count,
+    const usize* args_sizes,
+    void* args
+);
 
 ///
 struct coroutine_context_t {
@@ -81,7 +87,7 @@ struct coroutine_context_t {
     coroutine_stack_t* stack;
 };
 
-coroutine_context_t* coroutine_context_create();
+coroutine_context_t* coroutine_context_create(coroutine_func_pointer_t);
 void coroutine_context_free(coroutine_context_t*);
 void coroutine_context_set_stack(coroutine_context_t*);
 
@@ -99,15 +105,19 @@ typedef enum coroutine_state_t {
 struct coroutine_t {
     coroutine_context_t* context;
 
-    any_func_pointer_t func;
+    coroutine_func_pointer_t func;
     thread_t *thread;
-    coroutine_state_t state;
+    _Atomic(int) state;
     const char* location;
 };
 
 
 coroutine_t* coroutine_create(
-    const char* location, any_func_pointer_t func, usize args_count, void** args
+    const char* location,
+    coroutine_func_pointer_t func,
+    usize args_count,
+    usize* args_sizes,
+    void* args
 );
 
 void coroutine_free(coroutine_t* coroutine);
@@ -119,12 +129,6 @@ __attribute__((noinline)) volatile void* prologue(const char* location);
 __attribute__((noinline)) volatile void* epilogue();
 __attribute__((noinline)) volatile void yield(const char* location);
 
-#ifndef m_start_coroutine
-#define m_start_coroutine(fn, VA_ARGS) \
-    do { \
-        runtime_schedule(fn, ...VA_ARGS); \
-    } while (0)
-#endif
 
 #ifndef m_yield
 #define m_yield exit(2)
@@ -138,7 +142,6 @@ __attribute__((noinline)) volatile void yield(const char* location);
 
 struct coroutine_queue_node_t {
     coroutine_t* coroutine;
-    coroutine_queue_node_t* prev;
     coroutine_queue_node_t* next;
 };
 
@@ -154,11 +157,12 @@ struct coroutine_queue_t {
     usize size;
 };
 
+void coroutine_queue_init(coroutine_queue_t* queue);
 void coroutine_queue_free(coroutine_queue_t* queue);
 void coroutine_queue_append(coroutine_queue_t* queue, coroutine_t* coroutine);
 coroutine_t* coroutine_queue_popleft(coroutine_queue_t* queue);
 coroutine_t* coroutine_queue_popright(coroutine_queue_t* queue);
-void coroutine_queue_reenqueue(coroutine_queue_t* queue);
+coroutine_t* coroutine_queue_reenqueue(coroutine_queue_t* queue);
 
 /** coroutines queue **/
 
@@ -167,8 +171,11 @@ void coroutine_queue_reenqueue(coroutine_queue_t* queue);
 struct scheduler_t {
     coroutine_t* current;
 
-    coroutine_queue_t* local_queue;
+    coroutine_queue_t local_queue;
 };
+
+scheduler_t* scheduler_create();
+void scheduler_free(scheduler_t* scheduler);
 
 coroutine_t* scheduler_get_first_runnable(scheduler_t* scheduler);
 /** scheduler **/
@@ -180,8 +187,9 @@ typedef enum thread_state_t {
     ts_created = 0,
     ts_idle = 1,
     ts_running = 2,
-    ts_syscall = 3,
-    ts_dead = 3,
+    ts_scheduling = 3,
+    ts_syscall = 4,
+    ts_dead = 5,
 } thread_state_t;
 
 typedef struct thread_t {
@@ -193,16 +201,32 @@ typedef struct thread_t {
     coroutine_t* main_coroutine;
     // todo: why my compiler doens't recognize atomic_int?
     _Atomic(int) state;
-    sem_t idle_semaphore;
+    dispatch_semaphore_t idle_semaphore;
+    // sem_t idle_semaphore;
     pthread_t pthread;
+    pthread_mutex_t queue_lock;
+
+    stack_t sighandler_stack;
 } thread_t;
 
 void sigurg_block();
 void sigurg_unblock();
+void copy_current_ucontext(registers_t* registers, const struct __darwin_arm_thread_state64* ss);
+void sigurg_handler(int sig, siginfo_t* si, void* vp) __attribute__((noinline, noreturn));
+
+void thread_enqueue_local(thread_t* thread, coroutine_t* coroutine);
+coroutine_t* thread_popleft_local(thread_t* thread);
+void thread_reenqueue_local(thread_t* thread);
+usize thread_local_queue_size(thread_t* thread);
+
+void thread_init(thread_t* thread);
+void thread_free(thread_t* thread);
+void* thread_schedule(void* self) __attribute__((noinline, noreturn));
 void* loom_working_thread_main(void* self_raw) __attribute__((noinline, noreturn));
 
 void thread_switch_to_coroutine(
     thread_t* thread, coroutine_t* from, coroutine_t* to
 )
 __attribute__((noinline, noreturn));
+
 #endif //LOOM_SCHEDULER_H

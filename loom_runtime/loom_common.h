@@ -20,7 +20,7 @@ typedef double f64;
 
 typedef unsigned long long usize;
 typedef char* str;
-typedef void* (*any_func_pointer_t)(void* q, ...); // why
+typedef void* (*coroutine_func_pointer_t)(void*); // why
 
 typedef struct function_pointer_t {
     void (*function)(void**);

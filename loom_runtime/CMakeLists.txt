@@ -24,6 +24,9 @@ add_executable(loom_runtime
         utils.h
         utils.c
 )
+target_compile_options(loom_runtime PRIVATE -fsanitize=address -g)
+target_link_libraries(loom_runtime PRIVATE -fsanitize=address)
+
 target_compile_options(loom_runtime PRIVATE
         -arch arm64
         -mbranch-protection=none

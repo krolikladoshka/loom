@@ -17,9 +17,12 @@
 typedef struct loom_runtime_t {
     processor_t* processors;
     thread_t* working_threads;
-    thread_t* monitor;
+
+    pthread_t monitor;
 
     coroutine_queue_t global_queue;
+
+    pthread_mutex_t queue_lock;
 } loom_runtime_t;
 
 static loom_runtime_t* loom_runtime;
@@ -27,6 +30,19 @@ static loom_runtime_t* loom_runtime;
 void init_loom_runtime();
 void free_loom_runtime();
 
-void loom_runtime_schedule_task(void* (*task)(void*), void* args);
+coroutine_t* runtime_schedule(
+    coroutine_func_pointer_t fn,
+    usize args_count,
+    usize* args_sizes,
+    void* args
+);
+void* loom_monitor_process(void*);
+
+#ifndef m_start_coroutine
+#define m_start_coroutine(fn, ...) \
+    do { \
+        runtime_schedule(fn); \
+    } while (0)
+#endif
 
 #endif //LOOM_RUNTIME_H
