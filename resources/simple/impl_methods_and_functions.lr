@@ -19,7 +19,7 @@ Test
         return a as i64;
     }
     
-    fn method_const_args(*mut self, a: i32, b: *i32) -> i64 {
+    fn method_mut_args(*mut self, a: i32, b: *i32) -> i64 {
         *self;
         
         return (a as i64) * (*b as i64);

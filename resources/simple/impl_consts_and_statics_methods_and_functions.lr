@@ -3,8 +3,8 @@ struct Test {}
 impl
 Test
 {
-    const const_variable: i32 = 3i32;
-    static static_variable: f64 = 0.2345;
+    const const_variable: i32 = 3u64;
+    static static_variable: f64 = 0.2345f64;
     
     fn function() {}
     fn function2(a: i32) -> i64 {
@@ -22,7 +22,7 @@ Test
         return a as i64;
     }
     
-    fn method_const_args(*mut self, a: i32, b: *i32) -> i64 {
+    fn method_mut_args(*mut self, a: i32, b: *i32) -> i64 {
         *self;
         
         return (a as i64) * (*b as i64);

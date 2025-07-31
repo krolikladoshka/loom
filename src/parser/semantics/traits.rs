@@ -1,9 +1,23 @@
+use crate::parser::semantics::SemanticsAnalyzer;
 // TODO: do something with formatter and linter to wrap uses to new lines or use use stmt per line
-use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplStatement, InplaceAssignment, LetStatement, Literal, LiteralNode, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, Unary, WhileStatement};
+use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Function, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, Unary, WhileStatement};
 use crate::syntax::lexer::Token;
 
-pub trait AstContext: Default {
-    type Output: Default;
+
+pub trait AstContext: Sized {
+    // type Output: Default;
+
+    fn then_analyze_by<NextContext, Mapper>(
+        self,
+        next_pass: SemanticsAnalyzer<NextContext>,
+        mapper: Mapper
+    ) -> NextContext
+    where
+        NextContext: AstContext,
+        Mapper: FnOnce(Self) -> NextContext
+    {
+        next_pass.analyze_with_context(mapper(self))
+    }
 }
 
 pub trait Semantics<SharedContext>
@@ -152,12 +166,68 @@ where
         _continue_statement: &ContinueStatement,
         _context: &mut SharedContext,
     ) {}
-
-    fn visit_fn_statement(
+    
+    fn visit_function_statement_default(
         &self,
         _fn_statement: &FnStatement,
-        _context: &mut SharedContext,
-    ) {}
+        function: &Function,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_all_statements(&function.body, context);
+    }
+    
+    fn visit_function_statement(
+        &self,
+        fn_statement: &FnStatement,
+        function: &Function,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_function_statement_default(fn_statement, function, context);
+    }
+    
+    fn visit_method_statement_default(
+        &self,
+        _fn_statement: &FnStatement,
+        method: &Method,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_all_statements(&method.body, context);
+    }
+    
+    fn visit_method_statement(
+        &self,
+        fn_statement: &FnStatement,
+        method: &Method,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_method_statement_default(fn_statement, method, context);
+    }
+    fn visit_fn_statement_default(
+        &self,
+        fn_statement: &FnStatement,
+        context: &mut SharedContext,
+    )
+    {
+        match fn_statement.function {
+            ImplFunction::Function(ref function) => 
+                self.visit_function_statement(fn_statement, function, context),
+            ImplFunction::Method(ref method) =>
+                self.visit_method_statement(fn_statement, method, context),
+        }
+    }
+    
+    fn visit_fn_statement(
+        &self,
+        fn_statement: &FnStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_fn_statement_default(fn_statement, context)
+    }
     
     fn visit_return_statement_default(
         &self,
@@ -191,12 +261,28 @@ where
         _context: &mut SharedContext,
     ) {}
 
+    fn visit_impl_statement_default(
+        &self,
+        impl_statement: &ImplStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_all_statements(&impl_statement.top_level_statements, context);
+
+        for function in &impl_statement.functions {
+            self.visit_fn_statement(function, context);
+        }
+    }
+    
     fn visit_impl_statement(
         &self,
-        _impl_statement: &ImplStatement,
-        _context: &mut SharedContext,
-    ) {}
-
+        impl_statement: &ImplStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_impl_statement_default(impl_statement, context)
+    }
+    
     fn visit_if_else_statement_default(
         &self,
         if_else_statement: &IfElseStatement,
@@ -489,8 +575,6 @@ where
     )
     {
         self.visit_expression(&if_else.condition, context);
-        self.visit_all_statements(&if_else.then_branch.statements, context);
-        
         self.visit_block_expression(&if_else.then_branch, context);
         self.visit_block_expression(&if_else.else_branch, context);
     }

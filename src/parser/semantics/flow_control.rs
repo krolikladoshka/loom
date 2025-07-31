@@ -1,7 +1,8 @@
-use crate::compiler::c_transpiler::CTranspilerContext;
-use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::syntax::ast::{BreakStatement, ContinueStatement, DeferStatement, FnStatement, ImplFunction, ImplStatement, ReturnStatement, SelfExpression, WhileStatement};
+use crate::parser::semantics::traits::Semantics;
+use crate::parser::semantics::FirstSemanticsPassContext;
+use crate::syntax::ast::{AstNodeIndex, BreakStatement, ContinueStatement, DeferStatement, FnStatement, Function, ImplFunction, ImplStatement, Method, ReturnStatement, SelfExpression, Statement, WhileStatement};
 use crate::syntax::lexer::Token;
+use std::collections::{HashMap, LinkedList};
 
 #[derive(Default, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum BlockType {
@@ -32,6 +33,9 @@ pub struct FlowControlContext {
     
     impl_and_top_level_block_type: BlockType,
     function_scope_block_type: BlockType,
+
+    closest_function_ast_node_id: Option<AstNodeIndex>,
+    pub function_deferred_calls: HashMap<AstNodeIndex, LinkedList<AstNodeIndex>>,
 }
 
 impl FlowControlContext {
@@ -49,16 +53,6 @@ impl FlowControlContext {
 }
 
 
-#[derive(Debug, Clone, Default)]
-pub struct FirstSemanticsPassContext {
-    // pub resolved_variables: HashMap<String, Identifier>,
-    // pub scopes: Vec<Scope>,
-    // pub transformed_ast: HashMap<usize, TransformedAstNode>
-    pub flow_control: FlowControlContext,
-    pub transpile: CTranspilerContext,
-}
-
-impl AstContext for FirstSemanticsPassContext { type Output = (); }
 impl FirstSemanticsPassContext {
     fn scope_block_type<F>(&mut self, block_type: BlockType, block: F)
     where
@@ -100,53 +94,24 @@ impl FlowControlSemantics {
             panic!("{} statement outside of function", keyword);
         }
     }
-
-    fn analyze_impl_function(
-        &self, function: &ImplFunction, context: &mut FirstSemanticsPassContext
+    
+    fn pin_defer_call_to_closest_function(
+        &self,
+        defer_statement: &DeferStatement,
+        context: &mut FirstSemanticsPassContext,
     )
     {
-        let block_type = match function {
-            ImplFunction::Function(_)  => BlockType::Function,
-            ImplFunction::Method(_) => BlockType::Method,
+        let Some(function_id) = context.flow_control.closest_function_ast_node_id else {
+            panic!(
+                "Tried to attach deferred call outside of function: defer statement {}",
+                defer_statement.node_id
+            );
         };
 
-        if block_type == BlockType::Method &&
-            context.flow_control.current_block_type != BlockType::Impl
-        {
-            panic!("Can't define a method outside of impl block");
-        }
-
-        context.scope_block_type(
-            block_type,
-            |ctx| {
-                match &function {
-                    ImplFunction::Function(function) => {
-                        let temp = ctx.flow_control.function_scope_block_type;
-                        ctx.flow_control.function_scope_block_type = BlockType::Function;
-                        
-                        ctx.scope_block_type(
-                            BlockType::Function,
-                            |c| self.visit_all_statements(&function.body, c)
-                        );
-                        
-                        ctx.flow_control.function_scope_block_type = temp;
-                    },
-                    ImplFunction::Method(method) => {
-                        let temp = ctx.flow_control.function_scope_block_type;
-                        ctx.flow_control.function_scope_block_type = BlockType::Method;
-                        
-                        ctx.scope_block_type(
-                            BlockType::Method,
-                            |c| self.visit_all_statements(
-                                &method.body, c
-                            )
-                        );
-                        
-                        ctx.flow_control.function_scope_block_type = temp;
-                    }
-                }
-            }
-        )
+        context.flow_control.function_deferred_calls
+            .entry(function_id)
+            .or_default()
+            .push_front(defer_statement.node_id);
     }
 }
 
@@ -178,11 +143,58 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         self.check_if_within_loops(context, &continue_statement.token);
     }
 
+    fn visit_function_statement(
+        &self,
+        fn_statement: &FnStatement,
+        function: &Function,
+        context: &mut FirstSemanticsPassContext
+    )
+    {
+        let temp = context.flow_control.function_scope_block_type;
+        context.flow_control.function_scope_block_type = BlockType::Function;
+        
+        context.scope_block_type(
+            BlockType::Function,
+            |ctx| self.visit_function_statement_default(
+                fn_statement,
+                function,
+                ctx
+            )
+        );
+        
+        context.flow_control.function_scope_block_type = temp;
+    }
+
+    fn visit_method_statement(
+        &self,
+        fn_statement: &FnStatement,
+        method: &Method,
+        context: &mut FirstSemanticsPassContext
+    )
+    {
+        let temp = context.flow_control.function_scope_block_type;
+        context.flow_control.function_scope_block_type = BlockType::Method;
+        
+        context.scope_block_type(
+            BlockType::Method,
+            |ctx| self.visit_method_statement_default(
+                fn_statement,
+                method,
+                ctx
+            )
+        );
+        
+        context.flow_control.function_scope_block_type = temp;
+    }
+
     fn visit_fn_statement(
         &self, fn_statement: &FnStatement, context: &mut FirstSemanticsPassContext
     )
     {
-        self.analyze_impl_function(&fn_statement.function, context)
+        let previous_function = context.flow_control.closest_function_ast_node_id;
+        context.flow_control.closest_function_ast_node_id = Some(fn_statement.node_id);
+        self.visit_fn_statement_default(fn_statement, context);
+        context.flow_control.closest_function_ast_node_id = previous_function;
     }
 
     fn visit_return_statement(
@@ -203,6 +215,7 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
     )
     {
         self.check_if_within_function(context, &defer_statement.token);
+        self.pin_defer_call_to_closest_function(defer_statement, context);
     }
 
     fn visit_impl_statement(
@@ -214,11 +227,21 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         context.scope_block_type(
             BlockType::Impl,
             |ctx| {
-                impl_statement.functions
-                    .iter()
-                    .for_each(|function| {
-                        self.analyze_impl_function(function, ctx);
-                    })
+                for top_level_statement in &impl_statement.top_level_statements {
+                    match top_level_statement {
+                        Statement::StaticStatement(..) | Statement::ConstStatement(..) => {},
+                        _ => panic!(
+                            "Top level statements of impl block can be 
+                            only static const or function declaration: {:?}",
+                            top_level_statement
+                        )
+                    }
+                }
+                self.visit_all_statements(&impl_statement.top_level_statements, ctx);
+                
+                for fn_statement in &impl_statement.functions {
+                    self.visit_fn_statement(fn_statement, ctx);
+                }
             }
         );
         context.flow_control.impl_and_top_level_block_type = temp;

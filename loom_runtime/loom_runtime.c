@@ -67,7 +67,6 @@ coroutine_t* runtime_schedule(
         args
     );
 
-    sigurg_block();
     m_assert_null(coroutine, "runtime schedule coroutine_create");
 
     pthread_mutex_lock(&loom_runtime->queue_lock);

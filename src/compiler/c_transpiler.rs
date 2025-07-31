@@ -1,12 +1,7 @@
 use std::collections::HashMap;
-use std::ops::Add;
-use std::os::unix::raw::off_t;
-use crate::parser::errors::ParserError;
-use crate::parser::parser::Parser;
-use crate::parser::semantics::flow_control::FirstSemanticsPassContext;
+use crate::parser::semantics::FirstSemanticsPassContext;
 use crate::parser::semantics::traits::Semantics;
-use crate::syntax::ast::{ArrowAccess, Assignment, Ast, AstNodeIndex, Binary, BreakStatement, Call, Cast, ContinueStatement, DotAccess, Expression, ExpressionStatement, FnStatement, Function, Grouping, Identifier, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, Literal, LiteralNode, PointerAnnotation, ReturnStatement, SelfExpression, Statement, StructStatement, Type, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
-use crate::syntax::tokens::TokenType::Let;
+use crate::syntax::ast::{ArrowAccess, Assignment, Ast, AstNodeIndex, Binary, BreakStatement, Call, Cast, ContinueStatement, DotAccess, Expression, ExpressionStatement, FnStatement, Grouping, Identifier, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, PointerAnnotation, ReturnStatement, SelfExpression, Statement, StructStatement, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
 
 #[derive(Debug, Clone)]
 pub struct CTranspilerContext {
@@ -65,7 +60,7 @@ impl CTranspilerSemantics {
     {
         context.transpile.set_transpile_result(
             statement.get_node_id(),
-            format!("/* {:?} */", statement),
+            format!("/* NOT TRANSPILED: {:?} */", statement),
         );
     }
 
@@ -528,7 +523,7 @@ impl Semantics<FirstSemanticsPassContext> for CTranspilerSemantics {
 
         for function in &impl_statement.functions {
             let transpiled_function = self.transpile_function(
-                function, impl_prefix.clone(), context
+                &function.function, impl_prefix.clone(), context
             );
             transpiled_declarations.push(transpiled_function);
         }

@@ -11,3 +11,4 @@ resources/example.rs
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+loom_runtime/debug

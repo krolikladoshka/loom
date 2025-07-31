@@ -1,7 +1,9 @@
-use std::marker::PhantomData;
 use std::rc::Rc;
+use crate::compiler::c_transpiler::CTranspilerContext;
 use crate::parser::errors::ParserError;
-use crate::parser::parser::Parser;
+use crate::parser::parser::{Parser, ParserResult};
+use crate::parser::semantics::flow_control::FlowControlContext;
+use crate::parser::semantics::name_resolving::NameResolvingContext;
 use crate::parser::semantics::traits::{AstContext, Semantics};
 use crate::syntax::ast::Statement;
 
@@ -9,34 +11,37 @@ pub mod scopes;
 pub mod flow_control;
 pub mod constraints;
 pub mod traits;
+pub mod name_resolving;
 
-/*
-class SemanticsAnalyzer:
-    def __init__(self):
-        self.semantics = []
-       
-    def analyze_next(self):
-        for semantic in self.semantics:
-            semantic.analyze_next()
- */
 
-pub struct SemanticsAnalyzer<'a, Ast, SharedContext>
+#[derive(Debug, Clone, Default)]
+pub struct FirstSemanticsPassContext {
+    pub flow_control: FlowControlContext,
+    pub name_resolving: NameResolvingContext,
+    pub transpile: CTranspilerContext,
+}
+
+impl AstContext for FirstSemanticsPassContext { /* type Output = (); */}
+
+
+pub struct SemanticsAnalyzer<'a, SharedContext>
 where
     SharedContext: AstContext,
 {
-    parser: &'a mut Parser,
+    parser_results: &'a [ParserResult<Statement>],
     analyzers: Vec<Rc<dyn Semantics<SharedContext>>>,
-    _marker: PhantomData<Ast>,
 }
 
-
-impl<'a, Ast, SharedContext> SemanticsAnalyzer<'a, Ast, SharedContext>
+impl<'a, SharedContext> SemanticsAnalyzer<'a, SharedContext>
 where
-    SharedContext: AstContext<Output = Ast>
+    SharedContext: AstContext
 {
-    pub fn new(parser: &'a mut Parser) -> SemanticsAnalyzer<Ast, SharedContext> {
-        SemanticsAnalyzer::<SharedContext::Output, SharedContext> {
-            parser, analyzers: vec![], _marker: Default::default()
+    pub fn new(parser_results: &'a [ParserResult<Statement>])
+               -> SemanticsAnalyzer<'a, SharedContext>
+    {
+        SemanticsAnalyzer::<SharedContext> {
+            parser_results,
+            analyzers: vec![], // _marker: Default::default()
         }
     }
 
@@ -57,29 +62,24 @@ where
         self.analyzers.push(Rc::new(semantics));
     }
 
-    pub fn analyze_next(&mut self, statement: &Statement, context: &mut SharedContext) {
+    pub fn analyze_next(&self, statement: &Statement, context: &mut SharedContext) {
         for analyzer in self.analyzers.iter() {
             analyzer.visit_next(statement, context);
         }
     }
 
-    pub fn analyze(&mut self) -> SharedContext {
-        let mut context = SharedContext::default();
-
-        loop {
-            let parse_result = self.parser.parse_next();
-            match parse_result {
-                Ok(statement) => {
-                    self.analyze_next(&statement, &mut context);
-                },
+    pub fn analyze_with_context(&self, mut context: SharedContext) -> SharedContext {
+        for parser_result in self.parser_results.iter() {
+            match parser_result {
+                Ok(statement) =>
+                    self.analyze_next(statement, &mut context),
                 Err(ParserError::Eof) => break,
-                Err(e) => {
-                    panic!("{}", e);
-                }
+                Err(e) => panic!(
+                    "Parser error during semantics analyzing: {}", e
+                )
             }
-
         }
-        
+
         context
     }
-}
+} 

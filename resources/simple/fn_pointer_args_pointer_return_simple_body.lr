@@ -1,5 +1,5 @@
 struct TestA {
-    a:
+    a: i8
 }
 
 fn test2(

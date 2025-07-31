@@ -1,4 +1,4 @@
-use std::fmt::Pointer;
+use std::fmt::{Display, Formatter, Pointer};
 
 use crate::syntax::lexer::Token;
 
@@ -8,6 +8,15 @@ static mut AST_ID_COUNTER: usize = 0;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AstNodeIndex(pub usize);
 
+impl Display for AstNodeIndex {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "ast node index[{}]",
+            self.0
+        )
+    }
+}
 
 impl AstNodeIndex {
     pub fn increment(&mut self) -> AstNodeIndex {
@@ -215,7 +224,21 @@ impl Literal {
             value,
         }
     }
-
+    
+    pub fn new_f32(token: Token, value: f32) -> Self {
+        Self::F32 {
+            token,
+            value,
+        }
+    }
+    
+    pub fn new_f64(token: Token, value: f64) -> Self {
+        Self::F64 {
+            token,
+            value,
+        }
+    }
+    
     pub fn new_bool(token: Token, value: bool) -> Self {
         Self::Bool {
             // node_id: next_id(),
@@ -727,6 +750,16 @@ pub struct FnStatement{ //+
     pub function: ImplFunction,
 }
 
+impl FnStatement {
+    pub fn new(token: Token, function: ImplFunction) -> Self {
+        Self {
+            node_id: next_id(),
+            token,
+            function,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ReturnStatement { //+
     pub node_id: AstNodeIndex,
@@ -756,7 +789,7 @@ pub struct ImplStatement {
     pub token: Token,
     pub implemented_type: Token,
     pub top_level_statements: Vec<Statement>,
-    pub functions: Vec<ImplFunction>,
+    pub functions: Vec<FnStatement>,
 }
 
 #[derive(Debug, Clone)]
@@ -869,13 +902,9 @@ impl Statement {
     }
     
     pub fn new_fn(token: Token, function: ImplFunction) -> Self {
-        Statement::FnStatement(FnStatement{
-            node_id: next_id(),
-            token,
-            function,
-        })
+        Statement::FnStatement(FnStatement::new(token, function))
     }
-    
+
     pub fn new_struct(
         token: Token,
         name: Token,
@@ -893,7 +922,7 @@ impl Statement {
         token: Token,
         implemented_type: Token,
         top_level_statements: Vec<Statement>,
-        functions: Vec<ImplFunction>,
+        functions: Vec<FnStatement>,
     ) -> Self {
 
 

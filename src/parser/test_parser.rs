@@ -317,32 +317,38 @@ pub fn assert_tree_eq(
                 tidentifier("Test"),
                 vec![],
                 vec![
-                    ImplFunction::Function(Function {
-                        name: tidentifier("function"),
-                        arguments: vec![],
-                        return_type: None,
-                        body: vec![],
-                    }),
-                    ImplFunction::Function(Function {
-                        name: tidentifier("function2"),
-                        arguments: vec![
-                            ttypedecl!("a", TokenType::I32),
-                        ],
-                        return_type: Some(ttypean!(TokenType::I64)),
-                        body: vec![
-                            Statement::new_return(
-                                ttoken(TokenType::Return, "return", ""),
-                                Some(Box::new(Expression::new_cast(
-                                    ttoken(TokenType::As, "as", ""),
-                                    Expression::new_identifier(
-                                        tidentifier("a"),
-                                    ),
-                                    ttypean!(TokenType::I64),
-                                    false,
-                                )))
-                            )
-                        ],
-                    }),
+                    FnStatement::new(
+                        ttoken(TokenType::Fn, "fn", ""),
+                        ImplFunction::Function(Function {
+                            name: tidentifier("function"),
+                            arguments: vec![],
+                            return_type: None,
+                            body: vec![],
+                        })
+                    ),
+                    FnStatement::new(
+                        ttoken(TokenType::Fn, "fn", ""),
+                        ImplFunction::Function(Function {
+                            name: tidentifier("function2"),
+                            arguments: vec![
+                                ttypedecl!("a", TokenType::I32),
+                            ],
+                            return_type: Some(ttypean!(TokenType::I64)),
+                            body: vec![
+                                Statement::new_return(
+                                    ttoken(TokenType::Return, "return", ""),
+                                    Some(Box::new(Expression::new_cast(
+                                        ttoken(TokenType::As, "as", ""),
+                                        Expression::new_identifier(
+                                            tidentifier("a"),
+                                        ),
+                                        ttypean!(TokenType::I64),
+                                        false,
+                                    )))
+                                )
+                            ],
+                        }),
+                    )
                 ],
             )
         ]
@@ -359,4 +365,38 @@ pub fn test_simple_statements(
     let ast = parser.parse_panic();
 
     assert_tree_eq(expected_statements, ast);
+}
+
+#[rstest]
+#[case("./resources/simple/fn_no_args_no_return_empty.lr")]
+#[case("./resources/simple/fn_no_args_simple_return_empty.lr")]
+#[case("./resources/simple/fn_pointer_args_pointer_return_simple_body.lr")]
+#[case("./resources/simple/fn_simple_args_simple_return_empty.lr")]
+#[case("./resources/simple/fn_simple_args_simple_return_simple_body.lr")]
+#[case("./resources/simple/impl_consts_and_statics_methods_and_functions.lr")]
+#[case("./resources/simple/impl_empty.lr")]
+#[case("./resources/simple/impl_methods_and_functions.lr")]
+#[case("./resources/simple/impl_simple.lr")]
+#[case("./resources/simple/struct_compound_fields.lr")]
+#[case("./resources/simple/struct_no_fields.lr")]
+#[case("./resources/simple/struct_pointer_fields.lr")]
+#[case("./resources/simple/struct_simple_fields.lr")]
+#[case("./resources/example.rs")]
+pub fn test_semantics(#[case] source_code: &'static str) {
+    println!("Test case: {}", source_code);
+    let mut parser = create_test_parser(source_code);
+    parser.panic_on_error = true;
+    let (_, _, statements) = parser.parse();
+    
+    let flow_control_semantics = FlowControlSemantics {};
+    let name_table_semantics = NameResolvingSemantics {};
+    
+    let mut semantic_analyzer = SemanticsAnalyzer::new(&statements)
+        .with(flow_control_semantics)
+        .with(name_table_semantics);
+    
+    let ast_context = semantic_analyzer.analyze_with_context(
+        FirstSemanticsPassContext::default()
+    );
+    println!("done {}", source_code);
 }

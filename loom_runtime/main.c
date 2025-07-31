@@ -4,7 +4,7 @@
 #include "loom_runtime.h"
 
 volatile void simulate_work() {
-    for (volatile usize i = 0; i < 5000000; i++);
+    for (volatile usize i = 0; i < 0; i++);
 }
 
 int calculate(int i) {
@@ -128,6 +128,7 @@ void* ackermann_function(void*_) {
     sigblock_free(stack);
 }
 
+
 int main() {
     init_loom_runtime();
     /**
@@ -136,7 +137,6 @@ int main() {
      * TODO: ^won't work
      * TODO: trampoline(sched, fn): save_context(sched); restore_context; call tramp -> call restore_context -> call fn -> return to scheduler
      **/
-
     const char* aa = "AA";
     const char* bb = "I'm a fn1 second go call";;
     const char* cc = "Im a fn1 third go call";
@@ -158,8 +158,7 @@ int main() {
     runtime_schedule(factorial, 1, sizes, &ff2);
     runtime_schedule(ackermann_function, 1, sizes, &ff3);
 
-
     usleep(m_seconds(300) / m_microseconds(1));
-    free_loom_runtime();
+    // free_loom_runtime();
     return 0;
 }

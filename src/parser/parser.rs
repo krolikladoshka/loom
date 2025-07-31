@@ -1,19 +1,19 @@
 use crate::parser::errors::ParserError;
-use crate::syntax::ast::{AstNodeIndex, Expression, FnStatement, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
+use crate::syntax::ast::{AstNodeIndex, Expression, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
 use crate::syntax::lexer::Token;
 use crate::syntax::tokens::TokenType;
 use std::collections::HashMap;
-use std::fmt::{Debug, Display};
 use std::str::FromStr;
+use crate::dev_assert;
 
-type ParserResult<T> = Result<T, ParserError>;
+pub type ParserResult<T> = Result<T, ParserError>;
 
 
 pub struct Parser {
     tokens: Vec<Token>,
     start_position: usize,
     current_position: usize,
-    panic_on_error: bool,
+    pub(crate) panic_on_error: bool,
     node_id_counter: AstNodeIndex,
 }
 
@@ -188,8 +188,11 @@ impl Parser {
     pub(crate) fn parse_panic(&mut self) -> Vec<Statement> {
         self.panic_on_error = true;
 
-        let (result, _) = self.parse();
-
+        let (result, error, parse_results) = self.parse();
+        
+        assert!(error.is_none(), "parser returned an error during panic mode");
+        dev_assert!(parse_results.iter().all(|r| r.is_ok()), "parser returned an error during panic mode");
+        
         result
     }
 
@@ -210,17 +213,24 @@ impl Parser {
         result
     }
     
-    pub fn parse(&mut self) -> (Vec<Statement>, Option<Vec<ParserError>>) {
+    pub fn parse(&mut self)
+        -> (Vec<Statement>, Option<Vec<ParserError>>, Vec<ParserResult<Statement>>)
+    {
+        let mut parser_results = vec![];
         let mut ast = vec![];
         let mut errors = vec![];
 
         loop {
             match self.parse_next() {
-                Ok(statement) => ast.push(statement),
+                Ok(statement) => {
+                    ast.push(statement.clone());
+                    parser_results.push(Ok(statement));
+                },
                 Err(err) => {
                     if let ParserError::Eof = err {
                         break;
                     }
+                    parser_results.push(Err(err.clone()));
                     errors.push(err);
                     self.advance_until_next_statement();
                     self.empty_statement();
@@ -234,7 +244,7 @@ impl Parser {
             Some(errors)
         };
 
-        (ast, error)
+        (ast, error, parser_results)
     }
 
     fn advance_until_next_statement(&mut self) {
@@ -835,6 +845,7 @@ impl Parser {
             if token.token_type != TokenType::Comma {
                 break;
             }
+            self.advance();
         }
 
         let (type_identifier, body) = self.function_end()?;
@@ -1022,9 +1033,8 @@ impl Parser {
             match statement {
                 Statement::StaticStatement { .. } | Statement::ConstStatement { .. } =>
                     top_level_statements.push(statement),
-                Statement::FnStatement(FnStatement {
-                    function, ..
-                }) => impl_statements.push(function),
+                Statement::FnStatement(fn_statement) =>
+                    impl_statements.push(fn_statement),
                 _ => unreachable!(
                     "Unexpected statement while parsing impl statement"
                 ),
@@ -1220,10 +1230,15 @@ impl Parser {
     }
 
     fn parse_block_of_statements(&mut self) -> ParserResult<Vec<Statement>> {
-        self.require(TokenType::LeftBrace, "")?;
+        self.require(TokenType::LeftBrace, "'{' is required at the start of the block")?;
         let mut statements = vec![];
 
-        while let Some(token) = self.peek() {
+        loop {
+            self.advance_skipping_comments();
+            let Some(token) = self.peek() else {
+                break;
+            };
+            
             if token.token_type == TokenType::RightBrace {
                 break;
             }
@@ -1231,7 +1246,7 @@ impl Parser {
             let statement = self.statement()?;
             statements.push(statement);
         }
-        self.require(TokenType::RightBrace, "")?;
+        self.require(TokenType::RightBrace, "'}' is required at the end of the block")?;
 
         Ok(statements)
     }
@@ -1242,7 +1257,12 @@ impl Parser {
         let mut statements = vec![];
         let mut return_expression = None;
 
-        while let Some(token) = self.peek().cloned() {
+        loop {
+            self.advance_skipping_comments();
+            let Some(token) = self.peek().cloned() else {
+                break;
+            };
+            
             if token.token_type == TokenType::RightBrace {
                 break;
             }
@@ -1288,6 +1308,7 @@ impl Parser {
             TokenType::RightBrace,
             "Expected '}' at the end of block"
         )?;
+        self.advance_skipping_comments();
 
         Ok(Expression::new_block(
             token,
@@ -1415,6 +1436,30 @@ impl Parser {
                 self.token_as_literal(&token)?,
             ),
             TokenType::U64Literal => Literal::new_u64(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::I8Literal => Literal::new_u8(
+                token.clone(),
+                self.token_as_literal(&token)?
+            ),
+            TokenType::I16Literal => Literal::new_u16(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::I32Literal => Literal::new_u32(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::I64Literal => Literal::new_u64(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::F32Literal => Literal::new_f32(
+                token.clone(),
+                self.token_as_literal(&token)?,
+            ),
+            TokenType::F64Literal => Literal::new_f64(
                 token.clone(),
                 self.token_as_literal(&token)?,
             ),
@@ -1706,9 +1751,13 @@ impl Parser {
         F: Fn(&mut Self) -> ParserResult<Expression>
     {
         let mut expr = parse_operand(self)?;
-
-        while let Some(operator) = self.match_tokens(operators, "binary expression")?
-        {
+        loop {
+            self.advance_skipping_comments();
+            
+            let Some(operator) = self.match_tokens(operators, "binary expression")? else {
+                break;
+            };
+            
             self.advance_and_skip_next_comments();
 
             let right = parse_operand(self)?;
