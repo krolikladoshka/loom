@@ -135,7 +135,7 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
     {
         self.check_if_within_loops(context, &break_statement.token);
     }
-
+    
     fn visit_continue_statement(
         &self, continue_statement: &ContinueStatement, context: &mut FirstSemanticsPassContext
     )

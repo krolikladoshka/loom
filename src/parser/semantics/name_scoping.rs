@@ -1,18 +1,12 @@
 use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::parser::semantics::FirstSemanticsPassContext;
-use crate::syntax::ast::{AstNodeIndex, BlockExpression, ConstStatement, FnStatement, Function, IfElseExpression, IfElseStatement, ImplStatement, LetStatement, Method, Statement, StaticStatement, StructStatement, Type, WhileStatement};
+use crate::parser::semantics::{FirstSemanticsPassContext};
+use crate::syntax::ast::{current_id, AstNode, AstNodeIndex, BlockExpression, ConstStatement, FnStatement, Function, IfElseExpression, IfElseStatement, ImplStatement, LetStatement, Method, Statement, StaticStatement, StructStatement, Type, WhileStatement};
 use std::collections::HashMap;
-use crate::dev_assert_ne;
-
+use crate::{dev_assert, dev_assert_ne};
+use crate::parser::semantics::name_scoping::ScopeError::NameIsAlreadyDefined;
 
 pub type DeclarationMap<T> = HashMap<String, T>;
 pub type ScopeMap<T> = HashMap<String, T>;
-
-#[derive(Debug, Clone)]
-pub struct FunctionDeclaration {}
-
-#[derive(Debug, Clone)]
-pub struct MethodDeclaration {}
 
 #[derive(Debug, Clone)]
 pub struct ImplBlock {
@@ -21,8 +15,8 @@ pub struct ImplBlock {
     pub struct_ast_node_index: AstNodeIndex,
     pub static_variables: DeclarationMap<AstNodeIndex>,
     pub const_variables: DeclarationMap<AstNodeIndex>,
-    pub functions: DeclarationMap<FunctionDeclaration>,
-    pub methods: DeclarationMap<MethodDeclaration>,
+    pub functions: DeclarationMap<AstNodeIndex>,
+    pub methods: DeclarationMap<AstNodeIndex>,
 }
 
 impl ImplBlock {
@@ -79,12 +73,19 @@ pub struct Scope {
     pub static_declarations: ScopeMap<AstNodeIndex>,
     pub const_declarations: ScopeMap<AstNodeIndex>,
     pub functions: ScopeMap<AstNodeIndex>,
-    pub structs: ScopeMap<StructDeclaration>,
+    pub structs: ScopeMap<AstNodeIndex>,
     pub variables: ScopeMap<Vec<AstNodeIndex>>,
     pub impl_blocks: ScopeMap<ImplBlock>,
 }
 
 impl Scope {
+    pub fn new(parent_scope: Option<usize>) -> Self {
+        let mut scope = Scope::default();
+        scope.parent_scope = parent_scope;
+
+        scope
+    }
+
     pub fn find_in_scope(&self, name: &str) -> bool {
         self.variables.contains_key(name) ||
             self.functions.contains_key(name) ||
@@ -120,21 +121,148 @@ impl Scope {
 }
 
 
-
 #[derive(Debug, Clone, Default)]
 pub struct ScopeTree {
-    tree: Vec<usize>,
-    scopes: Vec<Scope>,
+    pub tree: Vec<usize>,
+    pub scopes: Vec<Scope>,
+    pub scope_id_by_node_index: Vec<usize>
 }
+
+enum ScopeError {
+    NameIsAlreadyDefined,
+}
+type ScopeResult = Result<(), ScopeError>;
 
 impl ScopeTree {
     pub fn new() -> Self {
+        let mut scopes_vec = Vec::with_capacity(
+            current_id().0.ilog10() as usize
+        );
+        scopes_vec.push(Scope::default());
+
         Self {
             tree: vec![0],
-            scopes: vec![Scope::default()],
+            scopes: scopes_vec,
+            scope_id_by_node_index: vec![0; current_id().into()],
         }
     }
-    fn find_in_all_impl_blocks(
+
+    #[inline(always)]
+    pub fn is_variable_defined(&self, scope_id: usize, name: &str) -> bool {
+        dev_assert!(
+            scope_id >= 0 && scope_id < self.scopes.len(),
+            "Scope id does not exist {}", scope_id
+        );
+
+        self.scopes[scope_id].variables.contains_key(name)
+    }
+
+    pub fn add_variable(
+        &mut self, scope_id: usize,
+        variable_name: String,
+        variable_node_id: AstNodeIndex
+    ) {
+        dev_assert!(
+            scope_id >= 0 && scope_id < self.scopes.len(),
+            "Scope id does not exist {}", scope_id
+        );
+        dev_assert!(
+            variable.ast_node_index.0 >= 0 &&
+            variable.ast_node_index < self.scope_id_by_node_index.len(),
+            "variable ast node index is out of range of predefined map of scopes: {}",
+            variable.ast_node_index
+        );
+
+        self.scopes[scope_id]
+            .variables
+            .entry(variable_name)
+            .or_default()
+            .push(variable_node_id);
+        self.scope_id_by_node_index[variable_node_id.0] = scope_id;
+    }
+
+    pub fn add_const(&mut self, scope_id: usize, const_variable: &ConstStatement) -> ScopeResult {
+        dev_assert!(
+            scope_id >= 0 && scope_id < self.scopes.len(),
+            "Scope id does not exist {}", scope_id
+        );
+        dev_assert!(
+            variable.ast_node_index.0 >= 0 &&
+            variable.ast_node_index < self.scope_id_by_node_index.len(),
+            "const variable ast node index is out of range of predefined map of scopes: {}",
+            variable.ast_node_index
+        );
+
+        self.check_if_already_defined(scope_id, &const_variable.name.lexeme)?;
+
+        self.scopes[scope_id].const_declarations.insert(
+            const_variable.name.lexeme.clone(), const_variable.node_id
+        );
+        self.scope_id_by_node_index[const_variable.node_id.0] = scope_id;
+
+        Ok(())
+    }
+
+    pub fn add_static(
+        &mut self,
+        scope_id: usize,
+        static_variable: &StaticStatement
+    ) -> ScopeResult {
+        dev_assert!(
+            scope_id >= 0 && scope_id < self.scopes.len(),
+            "Scope id does not exist {}", scope_id
+        );
+        dev_assert!(
+            variable.ast_node_index.0 >= 0 &&
+            variable.ast_node_index < self.scope_id_by_node_index.len(),
+            "static_variable variable ast node index is out of range
+            of predefined map of scopes: {}",
+            variable.ast_node_index
+        );
+
+        self.check_if_already_defined(scope_id, &static_variable.name.lexeme)?;
+
+        self.scopes[scope_id].const_declarations.insert(
+            static_variable.name.lexeme.clone(), static_variable.node_id
+        );
+        self.scope_id_by_node_index[static_variable.node_id.0] = scope_id;
+
+        Ok(())
+    }
+
+    fn add_function(
+        &mut self,
+        scope_id: usize,
+        function: &Function,
+        function_node_id: AstNodeIndex
+    ) -> ScopeResult {
+        dev_assert!(
+            scope_id >= 0 && scope_id < self.scopes.len(),
+            "Scope id does not exist {}", scope_id
+        );
+
+        self.check_if_already_defined(scope_id, &function.name.lexeme)?;
+
+        self.scopes[scope_id].functions.insert(
+            function.name.lexeme.clone(),
+            function_node_id
+        );
+        self.scope_id_by_node_index[function_node_id.0] = scope_id;
+
+        Ok(())
+    }
+
+
+    #[inline(always)]
+    fn check_if_already_defined(&self, scope_id: usize, name: &str) -> ScopeResult {
+        if self.scope_contains(scope_id, name) {
+            return Err(ScopeError::NameIsAlreadyDefined);
+        }
+
+        Ok(())
+    }
+
+    pub fn find_in_all_impl_blocks(
         &self,
         name: &str,
         struct_name: &str,
@@ -146,9 +274,8 @@ impl ScopeTree {
     }
     
     pub fn stack_scope(&mut self, parent: Option<usize>) -> (usize, &mut Scope) {
-        let parent_scope = parent.unwrap_or(0);
-        self.scopes.push(Scope::default());
-        self.tree.push(parent_scope);
+        self.scopes.push(Scope::new(parent));
+        self.tree.push(parent.unwrap_or(0));
 
         let idx = self.scopes.len() - 1;
         (idx, &mut self.scopes[idx])
@@ -177,8 +304,16 @@ impl ScopeTree {
         self.find_scope_index(parent_scope, name)
     }
 
+    pub fn find_in_scope(&self, scope_index: usize, name: &str) -> Option<&Scope> {
+        if self.scope_contains(scope_index, name) {
+            self.scopes.get(scope_index)
+        } else {
+            None
+        }
+    }
+
     #[inline(always)]
-    pub fn find_in_scope(&mut self, scope_index: usize, name: &str) -> Option<&mut Scope> {
+    pub fn find_in_scope_mut(&mut self, scope_index: usize, name: &str) -> Option<&mut Scope> {
         if self.scope_contains(scope_index, name) {
             self.scopes.get_mut(scope_index)
         } else {
@@ -187,11 +322,27 @@ impl ScopeTree {
     }
 
     #[inline(always)]
-    pub fn find_in_current_scope(&mut self, name: &str) -> Option<&mut Scope> {
+    pub fn find_in_current_scope(&self, name: &str) -> Option<&Scope> {
         self.find_in_scope(self.tree.len() - 1, name)
     }
 
-    pub fn find_from_scope(&mut self, scope_index: usize, name: &str) -> Option<(usize, &mut Scope)> {
+    #[inline(always)]
+    pub fn find_in_current_scope_mut(&mut self, name: &str) -> Option<&mut Scope> {
+        self.find_in_scope_mut(self.tree.len() - 1, name)
+    }
+
+    pub fn find_from_scope(&self, scope_index: usize, name: &str) -> Option<(usize, &Scope)> {
+        if scope_index >= self.scopes.len() {
+            return None;
+        }
+        let index = self.find_scope_index(scope_index, name)?;
+
+        Some((index, self.scopes.get(index).unwrap()))
+    }
+
+    pub fn find_from_scope_mut(
+        &mut self, scope_index: usize, name: &str
+    ) -> Option<(usize, &mut Scope)> {
         if scope_index >= self.scopes.len() {
             return None;
         }
@@ -201,8 +352,15 @@ impl ScopeTree {
     }
 
     #[inline(always)]
-    pub fn find_from_current_scope(&mut self, name: &str) -> Option<(usize, &mut Scope)> {
+    pub fn find_from_current_scope(&mut self, name: &str) -> Option<(usize, &Scope)> {
         self.find_from_scope(self.tree.len() - 1, name)
+    }
+
+    #[inline(always)]
+    pub fn find_from_current_scope_mut(
+        &mut self, name: &str
+    ) -> Option<(usize, &mut Scope)> {
+        self.find_from_scope_mut(self.tree.len() - 1, name)
     }
 }
 
@@ -234,15 +392,14 @@ impl StructImplView {
 }
 
 #[derive(Debug, Clone)]
-pub struct NameResolvingContext {
+pub struct NameScopingContext {
     pub local_scopes: ScopeTree,
-
     current_scope: usize,
     struct_impl_view: Vec<StructImplView>,
     is_within_impl_block: bool,
 }
 
-impl Default for NameResolvingContext {
+impl Default for NameScopingContext {
     fn default() -> Self {
         Self {
             local_scopes: ScopeTree::new(),
@@ -253,7 +410,7 @@ impl Default for NameResolvingContext {
     }
 }
 
-impl NameResolvingContext {
+impl NameScopingContext {
     #[inline(always)]
     pub fn get_scope(&self, scope_index: usize) -> &Scope {
         self.local_scopes.scopes.get(scope_index).unwrap()
@@ -281,23 +438,23 @@ impl FirstSemanticsPassContext {
     where
         Block: FnOnce(&mut Self)
     {
-        let prev_scope_id = self.name_resolving.current_scope;
-        let (new_scope_id, new_scope) = self.name_resolving.local_scopes.stack_scope(
+        let prev_scope_id = self.name_scoping.current_scope;
+        let (new_scope_id, _) = self.name_scoping.local_scopes.stack_scope(
             Some(prev_scope_id),
         );
-        self.name_resolving.current_scope = new_scope_id;
+        self.name_scoping.current_scope = new_scope_id;
 
         block(self);
 
-        self.name_resolving.current_scope = prev_scope_id;
+        self.name_scoping.current_scope = prev_scope_id;
     }
 }
 
-pub struct NameResolvingSemantics;
+pub struct NameScopingSemantics;
 
-impl AstContext for NameResolvingContext { }
+impl AstContext for NameScopingContext { }
 
-impl NameResolvingSemantics {
+impl NameScopingSemantics {
     fn visit_function_statement_within_new_scope(
         &self,
         fn_statement: &FnStatement,
@@ -305,19 +462,22 @@ impl NameResolvingSemantics {
         context: &mut FirstSemanticsPassContext
     ) {
         context.with_new_naming_scope(|context| {
-            let function_scope = context.name_resolving.get_current_scope_mut();
+            let function_scope = context.name_scoping.current_scope;
+            let local_scopes = &mut context.name_scoping.local_scopes;
 
             for arg in function.arguments.iter() {
-                if function_scope.variables.contains_key(&arg.name.lexeme) {
+                if local_scopes.is_variable_defined(function_scope, &arg.name.lexeme) {
                     panic!(
                         "Parameter {} is already defined for function {}",
                         arg.name.lexeme,
                         function.name.lexeme
                     );
                 }
-                function_scope.variables.entry(arg.name.lexeme.clone()).or_default().push(
-                    AstNodeIndex(1) // TODO:
-                )
+                local_scopes.add_variable(
+                    function_scope,
+                    arg.name.lexeme.clone(),
+                    arg.node_id
+                );
             }
 
             self.visit_function_statement_default(fn_statement, function, context);
@@ -325,7 +485,7 @@ impl NameResolvingSemantics {
     }
 }
 
-impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
+impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
     fn visit_statement(&self, statement: &Statement, context: &mut FirstSemanticsPassContext) {
         self.visit_statement_default(statement, context)
     }
@@ -338,28 +498,22 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
     {
         dev_assert_ne!(context.current_scope, 0);
         self.visit_let_statement_default(let_statement, context);
-
-        let scope = context.name_resolving.get_current_scope_mut();
+        let local_scopes = &mut context.name_scoping.local_scopes;
+        // let scope = context.name_resolving.get_current_scope_mut();
 
         let variable_name = &let_statement.name.lexeme;
-        if scope.const_declarations.contains_key(variable_name) {
+        if local_scopes.scope_contains(context.name_scoping.current_scope, variable_name) {
             panic!(
-                "Let variable {} can't shadow const variable in the same scope",
-                variable_name
-            );
-        }
-        if scope.static_declarations.contains_key(variable_name) {
-            panic!(
-                "let variable {} can't shadow static variable in the same scope",
+                "let variable {} can't shadow const or static variables in the same scope",
                 variable_name
             );
         }
 
-        scope
-            .variables
-            .entry(let_statement.name.lexeme.clone())
-            .or_default()
-            .push(let_statement.node_id);
+        local_scopes.add_variable(
+            context.name_scoping.current_scope,
+            variable_name.clone(),
+            let_statement.node_id,
+        );
     }
 
     fn visit_static_statement(
@@ -368,13 +522,12 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         context: &mut FirstSemanticsPassContext
     )
     {
-        let scope = context.name_resolving.get_current_scope_mut();
-
-        if scope.find_in_scope(&static_statement.name.lexeme) {
+        if let Err(NameIsAlreadyDefined) = context.name_scoping.local_scopes.add_static(
+            context.name_scoping.current_scope,
+            static_statement
+        ) {
             panic!("can't redefine static variables in same scope");
         }
-
-        scope.static_declarations.insert(static_statement.name.lexeme.clone(), static_statement.node_id);
 
         self.visit_expression(&static_statement.initializer, context);
     }
@@ -385,16 +538,12 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         context: &mut FirstSemanticsPassContext
     )
     {
-        let scope = context.name_resolving.get_current_scope_mut();
-
-        if scope.find_in_scope(&const_statement.name.lexeme) {
+        if let Err(NameIsAlreadyDefined) = context.name_scoping.local_scopes.add_const(
+            context.name_scoping.current_scope,
+            const_statement,
+        ) {
             panic!("can't redefine const variables in same scope");
         }
-
-        scope.const_declarations.insert(
-            const_statement.name.lexeme.clone(),
-            const_statement.node_id
-        );
 
         self.visit_expression(&const_statement.initializer, context);
     }
@@ -411,15 +560,15 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         function: &Function,
         context: &mut FirstSemanticsPassContext
     ) {
-        if context.name_resolving.is_within_impl_block {
+        if context.name_scoping.is_within_impl_block {
             let bound_struct_impl_view = context
-                .name_resolving
+                .name_scoping
                 .struct_impl_view
                 .last()
                 .unwrap();
             {
                 let struct_scope = context
-                    .name_resolving
+                    .name_scoping
                     .local_scopes
                     .scopes
                     .get_mut(bound_struct_impl_view.struct_scope_index)
@@ -437,7 +586,7 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 };
             }
 
-            if context.name_resolving.local_scopes.find_in_all_impl_blocks(
+            if context.name_scoping.local_scopes.find_in_all_impl_blocks(
                 &function.name.lexeme,
                 &bound_struct_impl_view.struct_name
             ) {
@@ -448,7 +597,7 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
             }
             
             let impl_block = context
-                .name_resolving
+                .name_scoping
                 .local_scopes
                 .scopes
                 .get_mut(bound_struct_impl_view.impl_block_scope_index)
@@ -458,11 +607,11 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 .unwrap();
             
             impl_block.functions.insert(
-                function.name.lexeme.clone(), FunctionDeclaration {}
+                function.name.lexeme.clone(), fn_statement.node_id
             );
             
-            let prev_scope = context.name_resolving.current_scope;
-            context.name_resolving.current_scope = bound_struct_impl_view.impl_block_scope_index;
+            let prev_scope = context.name_scoping.current_scope;
+            context.name_scoping.current_scope = bound_struct_impl_view.impl_block_scope_index;
             
             self.visit_function_statement_within_new_scope(
                 fn_statement,
@@ -470,20 +619,18 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 context
             );
             
-            context.name_resolving.current_scope = prev_scope;
+            context.name_scoping.current_scope = prev_scope;
         } else {
-            let scope = context.name_resolving.get_current_scope_mut();
-            
-            if scope.find_in_scope(&function.name.lexeme) {
+            if let Err(NameIsAlreadyDefined) = context.name_scoping.local_scopes.add_function(
+                context.name_scoping.current_scope,
+                function,
+                fn_statement.node_id,
+            ) {
                 panic!(
                     "Duplicated function declaration {}",
                     function.name.lexeme
                 );
             }
-            scope.functions.insert(
-                function.name.lexeme.clone(),
-                fn_statement.node_id,
-            );
             
             self.visit_function_statement_within_new_scope(
                 fn_statement,
@@ -500,20 +647,20 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         context: &mut FirstSemanticsPassContext
     ) {
         let bound_struct_impl_view = context
-            .name_resolving
+            .name_scoping
             .struct_impl_view
             .last()
             .unwrap();
         {
             let struct_scope = context
-                .name_resolving
+                .name_scoping
                 .local_scopes
                 .scopes
                 .get_mut(bound_struct_impl_view.struct_scope_index)
                 .unwrap();
 
 
-            let Some(struct_declaration) = struct_scope
+            let Some(_) = struct_scope
                 .structs
                 .get_mut(&bound_struct_impl_view.struct_name)
             else {
@@ -523,7 +670,7 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 );
             };
         }
-        if context.name_resolving.local_scopes.find_in_all_impl_blocks(
+        if context.name_scoping.local_scopes.find_in_all_impl_blocks(
             &method.name.lexeme,
             &bound_struct_impl_view.struct_name
         ) {
@@ -534,7 +681,7 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         }
         
         let impl_block = context
-            .name_resolving
+            .name_scoping
             .local_scopes
             .scopes
             .get_mut(bound_struct_impl_view.impl_block_scope_index)
@@ -544,41 +691,42 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
             .unwrap();
 
         impl_block.methods.insert(
-            method.name.lexeme.clone(), MethodDeclaration {}
+            method.name.lexeme.clone(), fn_statement.get_node_id()
         );
 
-        let prev_scope = context.name_resolving.current_scope;
-        context.name_resolving.current_scope = bound_struct_impl_view.impl_block_scope_index;
+        let prev_scope = context.name_scoping.current_scope;
+        context.name_scoping.current_scope = bound_struct_impl_view.impl_block_scope_index;
         
         context.with_new_naming_scope(
             |context| {
-                let prev_impl_block_flag = context.name_resolving.is_within_impl_block;
-                context.name_resolving.is_within_impl_block = true;
+                let prev_impl_block_flag = context.name_scoping.is_within_impl_block;
+                context.name_scoping.is_within_impl_block = true;
                 
-                let function_scope = context.name_resolving.get_current_scope_mut();
-                function_scope.variables.entry("self".to_string()).or_default().push(
-                    AstNodeIndex(1) // TODO:
-                );
+                let local_scopes = &mut context.name_scoping.local_scopes;
+                let function_scope = context.name_scoping.current_scope;
 
                 for arg in method.arguments.iter() {
-                    if function_scope.variables.contains_key(&arg.name.lexeme) {
+                    if local_scopes.is_variable_defined(function_scope, &arg.name.lexeme) {
                         panic!(
                             "Parameter {} is already defined for method {}",
                             arg.name,
-                            method.name.lexeme
+                            method.name
                         );
                     }
-                    function_scope.variables.entry(arg.name.lexeme.clone()).or_default().push(
-                        AstNodeIndex(1) // TODO:
+
+                    local_scopes.add_variable(
+                        function_scope,
+                        arg.name.lexeme.clone(),
+                        arg.node_id,
                     );
                 }
 
                 self.visit_all_statements(&method.body, context);
-                context.name_resolving.is_within_impl_block = prev_impl_block_flag;
+                context.name_scoping.is_within_impl_block = prev_impl_block_flag;
             }
         );
 
-        context.name_resolving.current_scope = prev_scope;
+        context.name_scoping.current_scope = prev_scope;
     }
 
     fn visit_struct_statement(
@@ -587,17 +735,14 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         context: &mut FirstSemanticsPassContext
     )
     {
-        let scope = context.name_resolving.get_current_scope_mut();
+        let scope = context.name_scoping.get_current_scope_mut();
 
         if scope.find_in_scope(&struct_statement.name.lexeme) {
             panic!("Struct {} is already defined in this scope", struct_statement.name.lexeme);
         }
 
         // TODO: define struct names for further type validation
-        scope.structs.insert(struct_statement.name.lexeme.clone(), StructDeclaration::new(
-            struct_statement.name.lexeme.clone(),
-            struct_statement.node_id
-        ));
+        scope.structs.insert(struct_statement.name.lexeme.clone(), struct_statement.get_node_id());
     }
 
     fn visit_impl_statement(
@@ -609,12 +754,11 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
         let struct_name = &impl_statement.implemented_type;
         let (struct_scope_idx, struct_ast_node_index) = {
             let Some((struct_scope_idx, struct_scope)) = context
-                .name_resolving
+                .name_scoping
                 .local_scopes
-                .find_from_current_scope(
+                .find_from_current_scope_mut(
                     &struct_name.lexeme
                 )
-
             else {
                 panic!(
                     "Name {} was not found in scope for method {}",
@@ -622,7 +766,7 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 );
             };
 
-            let Some(struct_declaration) = struct_scope
+            let Some(struct_declaration_node_id) = struct_scope
                 .structs
                 .get_mut(&struct_name.lexeme)
             else {
@@ -632,11 +776,11 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 );
             };
 
-            (struct_scope_idx, struct_declaration.ast_node_index)
+            (struct_scope_idx, *struct_declaration_node_id)
         };
         
 
-        let current_scope = context.name_resolving.get_current_scope_mut();
+        let current_scope = context.name_scoping.get_current_scope_mut();
         current_scope
             .impl_blocks
             .entry(struct_name.lexeme.clone())
@@ -646,20 +790,20 @@ impl Semantics<FirstSemanticsPassContext> for NameResolvingSemantics {
                 struct_ast_node_index,
             ));
 
-        context.name_resolving.struct_impl_view.push(StructImplView::new(
+        context.name_scoping.struct_impl_view.push(StructImplView::new(
             struct_name.lexeme.clone(),
             struct_ast_node_index,
             struct_scope_idx,
             impl_statement.node_id,
-            context.name_resolving.current_scope,
+            context.name_scoping.current_scope,
         ));
 
-        let prev_impl_block_flag = context.name_resolving.is_within_impl_block;
-        context.name_resolving.is_within_impl_block = true;
+        let prev_impl_block_flag = context.name_scoping.is_within_impl_block;
+        context.name_scoping.is_within_impl_block = true;
         // context.with_new_naming_scope(|context|
             self.visit_impl_statement_default(impl_statement, context);
         // );
-        context.name_resolving.is_within_impl_block = prev_impl_block_flag
+        context.name_scoping.is_within_impl_block = prev_impl_block_flag
     }
 
     fn visit_if_else_statement(&self, if_else_statement: &IfElseStatement, context: &mut FirstSemanticsPassContext) {

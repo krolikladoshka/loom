@@ -85,46 +85,46 @@ pub fn primitive_op_as_str(token_type: TokenType) -> &'static str {
 #[macro_export]
 macro_rules! ttypean {
     ($lit:literal $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Simple(
+        TypeAnnotation::new(
+            TypeKind::Simple(
                 Type { name: ttoken(TokenType::Identifier, $lit, $lit) }
             ),
             // name: ttoken(TokenType::Identifier, $lit, $lit),
-            is_mut: false $(|| $is_mut )?,
-        }
+            false $(|| $is_mut )?,
+        )
     };
     ($t:path $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Simple(
+        TypeAnnotation::new( 
+            TypeKind::Simple(
                 Type { name: ttoken($t, primitive_type_as_str($t), "") }
             ),
             // name: ttoken($t, primitive_type_as_str($t), ""),
-            is_mut: false $(|| $is_mut)?,
-        }
+            false $(|| $is_mut)?,
+        )
     };
 }
 
 #[macro_export]
 macro_rules! ttypedecl {
     ($name:expr, $lit:literal $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypean!($lit $(, $is_mut)?),
-        }
+        TypedDeclaration::new( 
+            tidentifier($name),
+            ttypean!($lit $(, $is_mut)?),
+        )
     };
     ($name:expr, $t:path $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypean!($t $(, $is_mut)?),
-        }
+        TypedDeclaration::new(
+            tidentifier($name),
+            ttypean!($t $(, $is_mut)?),
+        )
     };
 }
 
 #[macro_export]
 macro_rules! ttypeanptr {
      ($lit:literal, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Pointer(
+        TypeAnnotation::new(
+            TypeKind::Pointer(
                 PointerAnnotation {
                     inner_type: Box::new(TypeKind::Simple(Type {
                         name: ttoken(TokenType::Identifier, $lit, $lit),
@@ -132,12 +132,12 @@ macro_rules! ttypeanptr {
                     points_to_mut: $points_to_mut
                 },
             ),
-            is_mut: false $(|| $is_mut )?,
-        }
+            false $(|| $is_mut )?,
+        )
     };
     ($t:path, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypeAnnotation {
-            kind: TypeKind::Pointer(
+        TypeAnnotation::new( 
+            TypeKind::Pointer(
                 PointerAnnotation {
                     inner_type: Box::new(TypeKind::Simple(Type {
                         name: ttoken($t, primitive_type_as_str($t), ""),
@@ -145,28 +145,28 @@ macro_rules! ttypeanptr {
                     points_to_mut: $points_to_mut
                 }
             ),
-            is_mut: false $(|| $is_mut)?,
-        }
+            false $(|| $is_mut)?,
+        )
     };
 }
 
 #[macro_export]
 macro_rules! ttypedeclptr {
     ($name:expr, $lit:literal, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypeanptr!(
+        TypedDeclaration::new( 
+            tidentifier($name),
+            ttypeanptr!(
                 $lit, $points_to_mut $(, $is_mut)?
             )
-        }
+        )
     };
     ($name:expr, $t:path, $points_to_mut:expr $(, $is_mut:expr)?) => {
-        TypedDeclaration {
-            name: tidentifier($name),
-            declared_type: ttypeanptr!(
+        TypedDeclaration::new(
+            tidentifier($name),
+            ttypeanptr!(
                 $t, $points_to_mut $(, $is_mut)?
             )
-        }
+        )
     };
 }
 

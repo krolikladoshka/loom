@@ -1,5 +1,5 @@
 use crate::parser::errors::ParserError;
-use crate::syntax::ast::{AstNodeIndex, Expression, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
+use crate::syntax::ast::{Ast, AstNode, AstNodeIndex, Expression, Function, ImplFunction, Literal, Method, PointerAnnotation, Statement, Type, TypeAnnotation, TypeKind, TypedDeclaration};
 use crate::syntax::lexer::Token;
 use crate::syntax::tokens::TokenType;
 use std::collections::HashMap;
@@ -8,17 +8,22 @@ use crate::dev_assert;
 
 pub type ParserResult<T> = Result<T, ParserError>;
 
+pub enum AstRef<'a> {
+    Expression(&'a Expression),
+    Statement(&'a Statement)
+}
 
-pub struct Parser {
-    tokens: Vec<Token>,
+pub struct Parser<'a> {
+    pub tokens: Vec<Token>,
     start_position: usize,
     current_position: usize,
     pub(crate) panic_on_error: bool,
     node_id_counter: AstNodeIndex,
+    pub ast_nodes: HashMap<AstNodeIndex, AstRef<'a>>
 }
 
 
-impl Parser {
+impl<'a> Parser<'a> {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
@@ -26,6 +31,7 @@ impl Parser {
             current_position: 0,
             panic_on_error: false,
             node_id_counter: AstNodeIndex(0),
+            ast_nodes: HashMap::with_capacity(100),
         }
     }
     
@@ -496,7 +502,6 @@ impl Parser {
         } else {
             let simple_type = self.simple_type()?;
 
-
             Ok(PointerAnnotation {
                 inner_type: Box::new(TypeKind::Simple(simple_type)),
                 points_to_mut
@@ -534,17 +539,17 @@ impl Parser {
 
             let pointer_type = self.pointer_type()?;
 
-            Ok(TypeAnnotation {
-                kind: TypeKind::Pointer(pointer_type),
+            Ok(TypeAnnotation::new(
+                TypeKind::Pointer(pointer_type),
                 is_mut,
-            })
+            ))
         } else {
             let simple_type = self.simple_type()?;
 
-            Ok(TypeAnnotation {
-                kind: TypeKind::Simple(simple_type),
+            Ok(TypeAnnotation::new(
+                TypeKind::Simple(simple_type),
                 is_mut,
-            })
+            ))
         }
     }
 
@@ -757,10 +762,10 @@ impl Parser {
         let mut annotation = self.type_annotation(true)?;
         annotation.is_mut = is_mut;
 
-        Ok(TypedDeclaration {
-            name: argument_name,
-            declared_type: annotation,
-        })
+        Ok(TypedDeclaration::new(
+            argument_name,
+            annotation,
+        ))
     }
 
     fn function_end(&mut self) -> ParserResult<(Option<TypeAnnotation>, Vec<Statement>)>
@@ -968,10 +973,10 @@ impl Parser {
                         ));
                     };
 
-                    Ok(TypedDeclaration {
-                        name: identifier,
-                        declared_type: annotation,
-                    })
+                    Ok(TypedDeclaration::new(
+                        identifier,
+                        annotation,
+                    ))
                 }
             )?;
             fields.push(field);
@@ -1948,7 +1953,10 @@ impl Parser {
     #[inline(always)]
     pub fn parse_expression(&mut self) -> ParserResult<Expression> {
         // self.ranges()
-        self.parse_assignment()
+        let expression = self.parse_assignment()?;
+        self.ast_nodes.insert(expression.get_node_id(), AstRef::Expression(&expression));
+
+        Ok(expression)
     }
 
     fn primary_before_block(&mut self) -> ParserResult<Expression> {

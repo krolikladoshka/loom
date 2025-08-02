@@ -98,26 +98,22 @@ where
             self.visit_expression(&initializer, context);
         }
     }
-    fn visit_let_statement(
+
+    fn visit_static_statement_default(
         &self,
-        let_statement: &LetStatement,
+        static_statement: &StaticStatement,
         context: &mut SharedContext,
-    )
-    {
-        self.visit_let_statement_default(let_statement, context);
+    ) {
+        self.visit_expression(&static_statement.initializer, context);
     }
 
-    fn visit_static_statement(
+    fn visit_const_statement_default(
         &self,
-        _static_statement: &StaticStatement,
-        _context: &mut SharedContext,
-    ) {}
-
-    fn visit_const_statement(
-        &self,
-        _const_statement: &ConstStatement,
-        _context: &mut SharedContext,
-    ) {}
+        const_statement: &ConstStatement,
+        context: &mut SharedContext,
+    ) {
+        self.visit_expression(&const_statement.initializer, context);
+    }
 
     fn visit_expression_statement_default(
         &self,
@@ -126,15 +122,6 @@ where
     )
     {
         self.visit_expression(&expression_statement.expression, context);
-    }
-    
-    fn visit_expression_statement(
-        &self,
-        expression_statement: &ExpressionStatement,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression_statement_default(expression_statement, context);
     }
 
     fn visit_while_statement_default(
@@ -146,26 +133,6 @@ where
         self.visit_expression(&while_statement.condition, context);
         self.visit_all_statements(&while_statement.body, context);
     }
-    fn visit_while_statement(
-        &self,
-        while_statement: &WhileStatement,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_while_statement_default(while_statement, context)
-    }
-
-    fn visit_break_statement(
-        &self,
-        _break_statement: &BreakStatement,
-        _context: &mut SharedContext,
-    ) {}
-
-    fn visit_continue_statement(
-        &self,
-        _continue_statement: &ContinueStatement,
-        _context: &mut SharedContext,
-    ) {}
     
     fn visit_function_statement_default(
         &self,
@@ -176,17 +143,7 @@ where
     {
         self.visit_all_statements(&function.body, context);
     }
-    
-    fn visit_function_statement(
-        &self,
-        fn_statement: &FnStatement,
-        function: &Function,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_function_statement_default(fn_statement, function, context);
-    }
-    
+
     fn visit_method_statement_default(
         &self,
         _fn_statement: &FnStatement,
@@ -196,16 +153,7 @@ where
     {
         self.visit_all_statements(&method.body, context);
     }
-    
-    fn visit_method_statement(
-        &self,
-        fn_statement: &FnStatement,
-        method: &Method,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_method_statement_default(fn_statement, method, context);
-    }
+
     fn visit_fn_statement_default(
         &self,
         fn_statement: &FnStatement,
@@ -213,20 +161,11 @@ where
     )
     {
         match fn_statement.function {
-            ImplFunction::Function(ref function) => 
+            ImplFunction::Function(ref function) =>
                 self.visit_function_statement(fn_statement, function, context),
             ImplFunction::Method(ref method) =>
                 self.visit_method_statement(fn_statement, method, context),
         }
-    }
-    
-    fn visit_fn_statement(
-        &self,
-        fn_statement: &FnStatement,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_fn_statement_default(fn_statement, context)
     }
     
     fn visit_return_statement_default(
@@ -239,27 +178,14 @@ where
             self.visit_expression(return_expression, context);
         }
     }
-    
-    fn visit_return_statement(
+
+    fn visit_defer_statement_default(
         &self,
-        return_statement: &ReturnStatement,
+        defer_statement: &DeferStatement,
         context: &mut SharedContext,
-    ) 
-    {
-        self.visit_return_statement_default(return_statement, context)
+    ) {
+        self.visit_expression(&defer_statement.call_expression, context)
     }
-
-    fn visit_defer_statement(
-        &self,
-        _defer_statement: &DeferStatement,
-        _context: &mut SharedContext,
-    ) {}
-
-    fn visit_struct_statement(
-        &self,
-        _struct_statement: &StructStatement,
-        _context: &mut SharedContext,
-    ) {}
 
     fn visit_impl_statement_default(
         &self,
@@ -274,15 +200,6 @@ where
         }
     }
     
-    fn visit_impl_statement(
-        &self,
-        impl_statement: &ImplStatement,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_impl_statement_default(impl_statement, context)
-    }
-    
     fn visit_if_else_statement_default(
         &self,
         if_else_statement: &IfElseStatement,
@@ -295,17 +212,6 @@ where
         if let Some(else_statement) = &if_else_statement.else_branch {
             self.visit_all_statements(else_statement, context);
         }
-    }
-    
-    fn visit_if_else_statement(
-        &self,
-        if_else_statement: &IfElseStatement,
-        context: &mut SharedContext,
-    ) 
-    {
-        self.visit_if_else_statement_default(
-            if_else_statement, context
-        );
     }
 
     fn visit_expression_default(&self, expression: &Expression, context: &mut SharedContext) {
@@ -353,10 +259,6 @@ where
         }
     }
 
-    fn visit_expression(&self, expression: &Expression, context: &mut SharedContext) {
-        self.visit_expression_default(expression, context)
-    }
-
     fn visit_grouping_default(
         &self,
         grouping: &Grouping,
@@ -364,6 +266,269 @@ where
     )
     {
         self.visit_expression(&grouping.expression, context);
+    }
+
+    fn visit_dot_access_default(
+        &self,
+        dot_access: &DotAccess,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&dot_access.object, context);
+    }
+
+    fn visit_arrow_access_default(
+        &self,
+        arrow_access: &ArrowAccess,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&arrow_access.pointer, context);
+    }
+    
+    fn visit_call_default(&self, call: &Call, context: &mut SharedContext) {
+        self.visit_expression(&call.callee, context);
+        self.visit_all_expressions(&call.arguments, context);
+    }
+    
+    fn visit_array_slice_default(
+        &self,
+        array_slice: &ArraySlice,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&array_slice.array_expression, context);
+        self.visit_expression(&array_slice.slice_expression, context);
+    }
+
+    fn visit_unary_default(
+        &self,
+        unary: &Unary,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&unary.expression, context);
+    }
+
+    fn visit_cast_default(
+        &self,
+        cast: &Cast,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&cast.left, context);
+    }
+    
+    fn visit_binary_default(
+        &self,
+        binary: &Binary,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&binary.left, context);
+        self.visit_expression(&binary.right, context);
+    }
+
+    fn visit_range_default(
+        &self,
+        range: &Range,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&range.start, context);
+        self.visit_expression(&range.end, context);
+    }
+    
+    fn visit_inplace_assignment_default(
+        &self,
+        inplace_assignment: &InplaceAssignment,
+        context: &mut SharedContext,
+    ) 
+    {
+        self.visit_expression(&inplace_assignment.lhs, context);
+        self.visit_expression(&inplace_assignment.rhs, context);
+    }
+
+    fn visit_assignment_default(
+        &self,
+        assignment: &Assignment,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&assignment.lhs, context);
+        self.visit_expression(&assignment.rhs, context);
+    }
+    
+    fn visit_if_else_default(
+        &self,
+        if_else: &IfElseExpression,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression(&if_else.condition, context);
+        self.visit_block_expression(&if_else.then_branch, context);
+        self.visit_block_expression(&if_else.else_branch, context);
+    }
+
+    fn visit_block_expression_default(
+        &self,
+        block_expression: &BlockExpression,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_all_statements(&block_expression.statements, context);
+        if let Some(return_expression) = &block_expression.return_expression {
+            self.visit_expression(return_expression, context);
+        }
+    }
+
+    fn visit_fn_expression_default(
+        &self,
+        fn_expression: &FnExpression,
+        context: &mut SharedContext,
+    ) {
+        self.visit_all_statements(&fn_expression.function.body, context);
+    }
+
+    fn visit_struct_initializer_default(
+        &self,
+        struct_initializer: &StructInitializer,
+        context: &mut SharedContext,
+    ) {
+        for (_, field_initializer) in &struct_initializer.field_initializers {
+            self.visit_expression(field_initializer, context);
+        }
+    }
+
+    fn visit_let_statement(
+        &self,
+        let_statement: &LetStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_let_statement_default(let_statement, context);
+    }
+
+    fn visit_static_statement(
+        &self,
+        static_statement: &StaticStatement,
+        context: &mut SharedContext,
+    ) {
+        self.visit_static_statement_default(static_statement, context);
+    }
+
+    fn visit_const_statement(
+        &self,
+        const_statement: &ConstStatement,
+        context: &mut SharedContext,
+    ) {
+        self.visit_const_statement_default(const_statement, context);
+    }
+
+    fn visit_expression_statement(
+        &self,
+        expression_statement: &ExpressionStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_expression_statement_default(expression_statement, context);
+    }
+
+    fn visit_while_statement(
+        &self,
+        while_statement: &WhileStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_while_statement_default(while_statement, context)
+    }
+
+    fn visit_break_statement(
+        &self,
+        _break_statement: &BreakStatement,
+        _context: &mut SharedContext,
+    ) {}
+
+    fn visit_continue_statement(
+        &self,
+        _continue_statement: &ContinueStatement,
+        _context: &mut SharedContext,
+    ) {}
+
+    fn visit_function_statement(
+        &self,
+        fn_statement: &FnStatement,
+        function: &Function,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_function_statement_default(fn_statement, function, context);
+    }
+
+    fn visit_method_statement(
+        &self,
+        fn_statement: &FnStatement,
+        method: &Method,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_method_statement_default(fn_statement, method, context);
+    }
+
+    fn visit_fn_statement(
+        &self,
+        fn_statement: &FnStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_fn_statement_default(fn_statement, context)
+    }
+
+    fn visit_return_statement(
+        &self,
+        return_statement: &ReturnStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_return_statement_default(return_statement, context)
+    }
+
+    fn visit_defer_statement(
+        &self,
+        defer_statement: &DeferStatement,
+        context: &mut SharedContext,
+    ) {
+        self.visit_defer_statement_default(defer_statement, context)
+    }
+
+    fn visit_struct_statement(
+        &self,
+        _struct_statement: &StructStatement,
+        _context: &mut SharedContext,
+    ) {}
+
+    fn visit_impl_statement(
+        &self,
+        impl_statement: &ImplStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_impl_statement_default(impl_statement, context)
+    }
+
+    fn visit_if_else_statement(
+        &self,
+        if_else_statement: &IfElseStatement,
+        context: &mut SharedContext,
+    )
+    {
+        self.visit_if_else_statement_default(
+            if_else_statement, context
+        );
+    }
+
+    fn visit_expression(&self, expression: &Expression, context: &mut SharedContext) {
+        self.visit_expression_default(expression, context)
     }
 
     fn visit_grouping(
@@ -387,15 +552,6 @@ where
         _context: &mut SharedContext,
     ) {}
 
-    fn visit_dot_access_default(
-        &self,
-        dot_access: &DotAccess,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&dot_access.object, context);
-    }
-    
     fn visit_dot_access(
         &self,
         dot_access: &DotAccess,
@@ -405,15 +561,6 @@ where
         self.visit_dot_access_default(dot_access, context);
     }
 
-    fn visit_arrow_access_default(
-        &self,
-        arrow_access: &ArrowAccess,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&arrow_access.pointer, context);
-    }
-    
     fn visit_arrow_access(
         &self,
         arrow_access: &ArrowAccess,
@@ -421,11 +568,6 @@ where
     )
     {
         self.visit_arrow_access_default(arrow_access, context);
-    }
-    
-    fn visit_call_default(&self, call: &Call, context: &mut SharedContext) {
-        self.visit_expression(&call.callee, context);
-        self.visit_all_expressions(&call.arguments, context);
     }
 
     fn visit_call(
@@ -436,17 +578,7 @@ where
     {
         self.visit_call_default(call, context);
     }
-    
-    fn visit_array_slice_default(
-        &self,
-        array_slice: &ArraySlice,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&array_slice.array_expression, context);
-        self.visit_expression(&array_slice.slice_expression, context);
-    }
-    
+
     fn visit_array_slice(
         &self,
         slice: &ArraySlice,
@@ -456,52 +588,24 @@ where
         self.visit_array_slice_default(slice, context);
     }
 
-    fn visit_unary_default(
-        &self,
-        unary: &Unary,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&unary.expression, context);
-    }
-    
     fn visit_unary(
         &self,
         unary: &Unary,
         context: &mut SharedContext,
-    ) 
+    )
     {
         self.visit_unary_default(unary, context);
     }
 
-    fn visit_cast_default(
-        &self,
-        cast: &Cast,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&cast.left, context);
-    }
-    
     fn visit_cast(
         &self,
         cast: &Cast,
         context: &mut SharedContext,
-    ) 
+    )
     {
         self.visit_cast_default(cast, context);
     }
-    
-    fn visit_binary_default(
-        &self,
-        binary: &Binary,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&binary.left, context);
-        self.visit_expression(&binary.right, context);
-    }
-    
+
     fn visit_binary(
         &self,
         binary: &Binary,
@@ -511,16 +615,6 @@ where
         self.visit_binary_default(binary, context);
     }
 
-    fn visit_range_default(
-        &self,
-        range: &Range,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&range.start, context);
-        self.visit_expression(&range.end, context);
-    }
-    
     fn visit_range(
         &self,
         range: &Range,
@@ -530,55 +624,24 @@ where
         self.visit_range_default(range, context);
     }
 
-    fn visit_inplace_assignment_default(
-        &self,
-        inplace_assignment: &InplaceAssignment,
-        context: &mut SharedContext,
-    ) 
-    {
-        self.visit_expression(&inplace_assignment.lhs, context);
-        self.visit_expression(&inplace_assignment.rhs, context);
-    }
-    
     fn visit_inplace_assignment(
         &self,
         inplace_assignment: &InplaceAssignment,
         context: &mut SharedContext,
-    ) 
+    )
     {
         self.visit_inplace_assignment_default(inplace_assignment, context);
     }
 
-    fn visit_assignment_default(
-        &self,
-        assignment: &Assignment,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&assignment.lhs, context);
-        self.visit_expression(&assignment.rhs, context);
-    }
-    
     fn visit_assignment(
         &self,
         assignment: &Assignment,
         context: &mut SharedContext,
-    ) 
+    )
     {
         self.visit_assignment_default(assignment, context);
     }
-    
-    fn visit_if_else_default(
-        &self,
-        if_else: &IfElseExpression,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_expression(&if_else.condition, context);
-        self.visit_block_expression(&if_else.then_branch, context);
-        self.visit_block_expression(&if_else.else_branch, context);
-    }
-    
+
     fn visit_if_else(
         &self,
         if_else: &IfElseExpression,
@@ -588,18 +651,6 @@ where
         self.visit_if_else_default(if_else, context)
     }
 
-    fn visit_block_expression_default(
-        &self,
-        block_expression: &BlockExpression,
-        context: &mut SharedContext,
-    )
-    {
-        self.visit_all_statements(&block_expression.statements, context);
-        if let Some(return_expression) = &block_expression.return_expression {
-            self.visit_expression(return_expression, context);
-        }
-    }
-    
     fn visit_block_expression(
         &self,
         block: &BlockExpression,
@@ -614,16 +665,20 @@ where
         _self: &SelfExpression,
         _context: &mut SharedContext,
     ) {}
-    
+
     fn visit_fn_expression(
         &self,
-        _fn_expression: &FnExpression,
-        _context: &mut SharedContext,
-    ) {}
+        fn_expression: &FnExpression,
+        context: &mut SharedContext,
+    ) {
+        self.visit_fn_expression_default(fn_expression, context);
+    }
 
     fn visit_struct_initializer(
         &self,
-        _struct_initializer: &StructInitializer,
-        _context: &mut SharedContext,
-    ) {}
+        struct_initializer: &StructInitializer,
+        context: &mut SharedContext,
+    ) {
+        self.visit_struct_initializer_default(struct_initializer, context);
+    }
 }

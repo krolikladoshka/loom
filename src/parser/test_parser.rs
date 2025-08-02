@@ -5,6 +5,7 @@ use crate::utils::test_utils::*;
 use crate::syntax::tokens::*;
 use crate::syntax::ast::*;
 use crate::*;
+use crate::parser::semantics::SecondSemanticsPassContext;
 
 pub fn assert_tree_eq(
     expected: Vec<Statement>, actual: Vec<Statement>
@@ -100,10 +101,10 @@ pub fn assert_tree_eq(
                     ),
                     ttypedeclptr!("test_field_i16", TokenType::I16, true),
                     ttypedeclptr!("test_field_i32", TokenType::I32, false),
-                    TypedDeclaration {
-                        name: tidentifier("test_field_i64"),
-                        declared_type: TypeAnnotation {
-                            kind: TypeKind::Pointer(PointerAnnotation {
+                    TypedDeclaration::new(
+                        tidentifier("test_field_i64"),
+                        TypeAnnotation::new(
+                            TypeKind::Pointer(PointerAnnotation {
                                 inner_type: Box::new(TypeKind::Pointer(
                                     PointerAnnotation {
                                         inner_type: Box::new(TypeKind::Pointer(
@@ -121,9 +122,9 @@ pub fn assert_tree_eq(
                                 )),
                                 points_to_mut: true,
                             }),
-                            is_mut: false,
-                        }
-                    },
+                            false,
+                        )
+                    ),
                     ttypedeclptr!("test_field_test_struct_a", "TestStructA", true),
                 ]
            ),
@@ -389,14 +390,21 @@ pub fn test_semantics(#[case] source_code: &'static str) {
     let (_, _, statements) = parser.parse();
     
     let flow_control_semantics = FlowControlSemantics {};
-    let name_table_semantics = NameResolvingSemantics {};
+    let name_scoping_semantics = NameScopingSemantics {};
     
-    let mut semantic_analyzer = SemanticsAnalyzer::new(&statements)
+    let semantic_analyzer = SemanticsAnalyzer::new(&statements)
         .with(flow_control_semantics)
-        .with(name_table_semantics);
+        .with(name_scoping_semantics);
     
-    let ast_context = semantic_analyzer.analyze_with_context(
-        FirstSemanticsPassContext::default()
-    );
+    // let second_pass_analyzer = SemanticsAnalyzer::new(&statements)
+    //     .with(name_resolving_semanti);
+
+    let _ast_context = semantic_analyzer.analyze_with_context(
+        FirstSemanticsPassContext::default());
+    // ).then_analyze_by(
+    //     second_pass_analyzer,
+    //     SecondSemanticsPassContext::from_first_pass
+    // );
+
     println!("done {}", source_code);
 }

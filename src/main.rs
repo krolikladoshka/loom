@@ -4,16 +4,18 @@ pub mod typing;
 pub mod syntax;
 pub mod utils;
 
-use crate::compiler::c_transpiler::{CTranspilerContext, CTranspilerSemantics};
+use std::collections::HashMap;
+use std::fmt::{Debug, Display, Formatter};
+// use crate::compiler::c_transpiler::{CTranspilerContext, CTranspilerSemantics};
 // use crate::compiler::c_transpiler::CTranspiler;
 use crate::parser::parser::Parser;
 use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::parser::semantics::{FirstSemanticsPassContext, SemanticsAnalyzer};
+use crate::parser::semantics::{FirstSemanticsPassContext, SecondSemanticsPassContext, SemanticsAnalyzer};
 use crate::syntax::ast::{Expression, Statement};
 use crate::syntax::lexer::Lexer;
 use crate::syntax::traits::TreePrint;
 use crate::parser::semantics::flow_control::{FlowControlContext, FlowControlSemantics};
-use crate::parser::semantics::name_resolving::{NameResolvingContext, NameResolvingSemantics};
+use crate::parser::semantics::name_scoping::{NameScopingContext, NameScopingSemantics};
 
 use std::fs::{read_to_string, File};
 use std::io::Write;
@@ -27,23 +29,19 @@ fn test() {
     let t = Test { field: 1};
 }
 
-pub struct SecondSemanticsPassContext {
-    pub first_semantics_pass_context: FirstSemanticsPassContext,
-    pub new_data: Vec<i32>
-}
 
-pub struct ThirdSemanticsPassContext<'a> {
-    pub first_semantics_pass_context: &'a mut FirstSemanticsPassContext,
-    pub second_semantics_pass_context: SecondSemanticsPassContext,
-    pub transpile: CTranspilerContext
-}
-impl AstContext for SecondSemanticsPassContext {
-    // type Output = (); 
-}
-impl AstContext for ThirdSemanticsPassContext<'_> { 
-    // type Output = (); 
-}
-
+// pub struct ThirdSemanticsPassContext<'a> {
+//     pub first_semantics_pass_context: &'a mut FirstSemanticsPassContext,
+//     pub second_semantics_pass_context: SecondSemanticsPassContext,
+//     pub transpile: CTranspilerContext
+// }
+// impl AstContext for SecondSemanticsPassContext {
+//     // type Output = (); 
+// }
+// impl AstContext for ThirdSemanticsPassContext<'_> { 
+//     // type Output = (); 
+// }
+// 
 // struct SecondSemanticsPass;
 // impl Semantics<SecondSemanticsPassContext<'_>> for SecondSemanticsPass {}
 
@@ -54,6 +52,26 @@ impl AstContext for ThirdSemanticsPassContext<'_> {
 //
 // impl Semantics<ThirdSemanticsPassContext<'_>> for CTranspilerSemantics {}
 
+
+trait Referenced<'a> {
+    fn on_ref(&self, q: &'a i32) -> i32 {
+        q.clone()
+    }
+}
+
+struct Testq {
+    pub field: i32,
+}
+
+impl Referenced<'_> for Testq {
+    fn on_ref(&self, q: &i32) -> i32 {
+        q.clone() + self.field 
+    }
+}
+
+fn q() {
+    Testq { field: 42 }.on_ref(&3);
+}
 
 fn main() {
     let program = read_to_string(
@@ -75,12 +93,18 @@ fn main() {
     let (_, errors, parser_results ) = parser.parse();
 
     let flow_control_semantics = FlowControlSemantics {};
-    let name_table_semantics = NameResolvingSemantics {};
+    let name_scoping_semantics = NameScopingSemantics {};
     let first_pass = SemanticsAnalyzer::new(
         &parser_results
     )
         .with(flow_control_semantics)
-        .with(name_table_semantics);
+        .with(name_scoping_semantics);
+    // let second_pass = SemanticsAnalyzer::new(
+    //     &parser_results
+    // )
+    //     .with(name_table_semantics);
+        // .with(type_validation_semantics);
+    
 
     // let scope_resolving_semantics = NameResolvingSemantics {};
     // let typing_validation_semantics = TypingValidationSemantics {};
@@ -90,14 +114,15 @@ fn main() {
     //     .with(scope_resolving_semantics)
         // .with(typing_validation_semantics);
 
-    let c_transpiler_semantics = CTranspilerSemantics {};
-    let third_pass = SemanticsAnalyzer::new(
-        &parser_results
-    )
-        .with(c_transpiler_semantics);
+    // let c_transpiler_semantics = CTranspilerSemantics {};
+    // let third_pass = SemanticsAnalyzer::new(
+    //     &parser_results
+    // )
+    //     .with(c_transpiler_semantics);
     
     let ast_context = FirstSemanticsPassContext::default()
         .then_analyze_by(first_pass, |x| x);
+        // .then_analyze_by(second_pass, SecondSemanticsPassContext::from_first_pass);
         // .then_analyze_by(
         //     second_pass,
         //     |mut first_context| SecondSemanticsPassContext {
@@ -120,11 +145,11 @@ fn main() {
     // println!("{:?}", ast_context);
 
     // println!("{}", ast_context.transpile.result);
-    let mut file = File::create("./loom_runtime/main.c").unwrap();
-    file.write_all(ast_context.transpile.result.as_bytes()).unwrap();
-    file.flush().unwrap();
-
-    println!("{}", ast_context.transpile.transpile_results.len());
+    // let mut file = File::create("./loom_runtime/main.c").unwrap();
+    // file.write_all(ast_context.transpile.result.as_bytes()).unwrap();
+    // file.flush().unwrap();
+    // 
+    // println!("{}", ast_context.transpile.transpile_results.len());
 
     // let (ast, error) = parser.parse();
     // 

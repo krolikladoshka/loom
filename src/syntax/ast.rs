@@ -1,9 +1,12 @@
-use std::fmt::{Display, Formatter, Pointer};
+use std::fmt::{Display, Formatter};
 
 use crate::syntax::lexer::Token;
 
 static mut AST_ID_COUNTER: usize = 0;
 
+pub trait AstNode {
+    fn get_node_id(&self) -> AstNodeIndex;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AstNodeIndex(pub usize);
@@ -58,14 +61,11 @@ pub struct Identifier {
     pub name: Token,
 }
 
-pub struct Variable {
-
+impl AstNode for Identifier {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
-
-// #[derive(Debug, Clone)]
-// pub struct Literal {
-//
-// }
 
 #[derive(Debug, Clone)]
 pub enum Literal {
@@ -278,14 +278,36 @@ pub struct LiteralNode {
     pub literal: Literal,
 }
 
+impl AstNode for LiteralNode {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
+pub trait TypeName {
+    fn get_type_name(&self) -> &String;
+}
 #[derive(Debug, Clone)]
 pub struct Type {
     pub name: Token,
 }
+
+impl TypeName for Type {
+    fn get_type_name(&self) -> &String {
+        &self.name.lexeme
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PointerAnnotation {
     pub inner_type: Box<TypeKind>,
     pub points_to_mut: bool,
+}
+
+impl TypeName for PointerAnnotation {
+    fn get_type_name(&self) -> &String {
+        self.inner_type.get_type_name()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -294,23 +316,96 @@ pub enum TypeKind {
     Pointer(PointerAnnotation),
 }
 
+impl TypeName for TypeKind {
+    fn get_type_name(&self) -> &String {
+        match self {
+            TypeKind::Simple(simple) =>
+                simple.get_type_name(),
+            TypeKind::Pointer(pointer) =>
+                pointer.get_type_name(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeAnnotation {
     // pub name: Token,
+    pub node_id: AstNodeIndex,
     pub kind: TypeKind,
     pub is_mut: bool,
 }
 
+impl TypeName for TypeAnnotation {
+    fn get_type_name(&self) -> &String {
+        self.kind.get_type_name()
+    }
+}
+
+impl AstNode for TypeAnnotation {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
+impl TypeAnnotation {
+    pub fn new(kind: TypeKind, is_mut: bool) -> Self {
+        Self {
+            node_id: next_id(),
+            kind,
+            is_mut
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedDeclaration {
+    pub node_id: AstNodeIndex,
     pub name: Token,
     pub declared_type: TypeAnnotation,
 }
 
+impl TypeName for TypedDeclaration {
+    fn get_type_name(&self) -> &String {
+        self.declared_type.get_type_name()
+    }
+}
+
+impl TypedDeclaration {
+    pub fn new(
+        name: Token,
+        declared_type: TypeAnnotation,
+    ) -> Self {
+        Self {
+            node_id: next_id(),
+            name,
+            declared_type,
+        }
+    }
+}
+
+impl AstNode for TypedDeclaration {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 pub struct SizedTypedDeclaration {
+    node_id: AstNodeIndex,
     name: Token,
-    declared_type: Type,
+    declared_type: TypedDeclaration,
     size: usize,
+}
+
+impl TypeName for SizedTypedDeclaration {
+    fn get_type_name(&self) -> &String {
+        self.declared_type.get_type_name()
+    }
+}
+
+impl AstNode for SizedTypedDeclaration {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -320,6 +415,12 @@ pub struct Grouping {
     pub expression: Box<Expression>,
 }
 
+impl AstNode for Grouping {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DotAccess {
     pub node_id: AstNodeIndex,
@@ -327,11 +428,23 @@ pub struct DotAccess {
     pub name: Token,
 }
 
+impl AstNode for DotAccess {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ArrowAccess {
     pub node_id: AstNodeIndex,
     pub pointer: Box<Expression>,
     pub name: Token,
+}
+
+impl AstNode for ArrowAccess {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -342,6 +455,12 @@ pub struct Call {
     pub arguments: Vec<Expression>,
 }
 
+impl AstNode for Call {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ArraySlice {
     pub node_id: AstNodeIndex,
@@ -350,12 +469,24 @@ pub struct ArraySlice {
     pub slice_expression: Box<Expression>,
 }
 
+impl AstNode for ArraySlice {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Unary {
     pub node_id: AstNodeIndex,
     pub token: Token,
     pub operator: Token,
     pub expression: Box<Expression>,
+}
+
+impl AstNode for Unary {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -367,12 +498,24 @@ pub struct Cast {
     pub is_reinterpret_cast: bool, 
 }
 
+impl AstNode for Cast {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Binary {
     pub node_id: AstNodeIndex,
     pub left: Box<Expression>,
     pub operator: Token,
     pub right: Box<Expression>,
+}
+
+impl AstNode for Binary {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -384,6 +527,12 @@ pub struct Range {
     pub inclusive: bool,
 }
 
+impl AstNode for Range {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct InplaceAssignment {
     pub node_id: AstNodeIndex,
@@ -393,12 +542,24 @@ pub struct InplaceAssignment {
     pub rhs: Box<Expression>,
 }
 
+impl AstNode for InplaceAssignment {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Assignment {
     pub node_id: AstNodeIndex,
     pub token: Token,
     pub lhs: Box<Expression>,
     pub rhs: Box<Expression>,
+}
+
+impl AstNode for Assignment {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -410,6 +571,12 @@ pub struct IfElseExpression {
     pub else_branch: BlockExpression,
 }
 
+impl AstNode for IfElseExpression {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BlockExpression {
     pub node_id: AstNodeIndex,
@@ -418,10 +585,22 @@ pub struct BlockExpression {
     pub return_expression: Option<Box<Expression>>
 }
 
+impl AstNode for BlockExpression {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SelfExpression {
     pub node_id: AstNodeIndex,
     pub token: Token,
+}
+
+impl AstNode for SelfExpression {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -431,12 +610,24 @@ pub struct FnExpression {
     pub function: Function,
 }
 
+impl AstNode for FnExpression {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StructInitializer {
     pub node_id: AstNodeIndex,
     pub token: Token,
     pub struct_name: Token,
     pub field_initializers: Vec<(Token, Expression)>,
+}
+
+impl AstNode for StructInitializer {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -631,42 +822,44 @@ impl Expression {
             rhs: Box::new(right),
         })
     }
+}
 
-    pub fn get_node_id(&self) -> AstNodeIndex {
+impl AstNode for Expression {
+    fn get_node_id(&self) -> AstNodeIndex {
         match self {
-            Expression::Grouping(x) => x.node_id,
-            Expression::Literal(x) => x.node_id,
-            Expression::Identifier(x) => x.node_id,
+            Expression::Grouping(x) => x.get_node_id(),
+            Expression::Literal(x) => x.get_node_id(),
+            Expression::Identifier(x) => x.get_node_id(),
             Expression::MethodCall { node_id } => *node_id,
             Expression::DotSet { node_id } => *node_id,
             Expression::ArrowSet { node_id } => *node_id,
-            Expression::DotAccess(x) => x.node_id,
-            Expression::ArrowAccess(x) => x.node_id,
-            Expression::Call(x) => x.node_id,
-            Expression::ArraySlice(x) => x.node_id,
-            Expression::Unary(x) => x.node_id,
-            Expression::Cast(x) => x.node_id,
-            Expression::Binary(x) => x.node_id,
-            Expression::Range(x) => x.node_id,
-            Expression::InplaceAssignment(x) => x.node_id,
-            Expression::Assignment(x) => x.node_id,
-            Expression::IfElseExpression(x) => x.node_id,
-            Expression::Block(x) => x.node_id,
-            Expression::SelfExpression(x) => x.node_id,
-            Expression::FnExpression(x) => x.node_id,
-            Expression::StructInitializer(x) => x.node_id,
+            Expression::DotAccess(x) => x.get_node_id(),
+            Expression::ArrowAccess(x) => x.get_node_id(),
+            Expression::Call(x) => x.get_node_id(),
+            Expression::ArraySlice(x) => x.get_node_id(),
+            Expression::Unary(x) => x.get_node_id(),
+            Expression::Cast(x) => x.get_node_id(),
+            Expression::Binary(x) => x.get_node_id(),
+            Expression::Range(x) => x.get_node_id(),
+            Expression::InplaceAssignment(x) => x.get_node_id(),
+            Expression::Assignment(x) => x.get_node_id(),
+            Expression::IfElseExpression(x) => x.get_node_id(),
+            Expression::Block(x) => x.get_node_id(),
+            Expression::SelfExpression(x) => x.get_node_id(),
+            Expression::FnExpression(x) => x.get_node_id(),
+            Expression::StructInitializer(x) => x.get_node_id(),
         }
     }
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: Token,
     pub arguments: Vec<TypedDeclaration>,
     pub return_type: Option<TypeAnnotation>,
     pub body: Vec<Statement>,
 }
+
 
 #[derive(Debug, Clone)]
 pub struct Method {
@@ -696,6 +889,12 @@ pub struct LetStatement {
     pub is_mut: bool,
 }
 
+impl AstNode for LetStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StaticStatement { //+-
     pub node_id: AstNodeIndex,
@@ -704,6 +903,12 @@ pub struct StaticStatement { //+-
     pub variable_type: TypeAnnotation,
     pub initializer: Box<Expression>,
     pub is_mut: bool,
+}
+
+impl AstNode for StaticStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -715,10 +920,22 @@ pub struct ConstStatement{ //+-
     pub initializer: Box<Expression>,
 }
 
+impl AstNode for ConstStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ExpressionStatement {
     pub node_id: AstNodeIndex,
     pub expression: Box<Expression>,
+}
+
+impl AstNode for ExpressionStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -729,11 +946,23 @@ pub struct WhileStatement { //++
     pub body: Vec<Statement>,
 }
 
+impl AstNode for WhileStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BreakStatement {
     pub node_id: AstNodeIndex,
     pub token: Token,
     pub loop_key: Option<Token>
+}
+
+impl AstNode for BreakStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -743,11 +972,23 @@ pub struct ContinueStatement {
     pub loop_key: Option<Token>
 }
 
+impl AstNode for ContinueStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FnStatement{ //+
     pub node_id: AstNodeIndex,
     pub token: Token,
     pub function: ImplFunction,
+}
+
+impl AstNode for FnStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 impl FnStatement {
@@ -767,6 +1008,12 @@ pub struct ReturnStatement { //+
     pub expression: Option<Box<Expression>>
 }
 
+impl AstNode for ReturnStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DeferStatement {
     pub node_id: AstNodeIndex,
@@ -775,12 +1022,24 @@ pub struct DeferStatement {
     pub to_closest_block: bool
 }
 
+impl AstNode for DeferStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StructStatement {
     pub node_id: AstNodeIndex,
     pub token: Token,
     pub name: Token,
     pub fields: Vec<TypedDeclaration>,
+}
+
+impl AstNode for StructStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -792,6 +1051,12 @@ pub struct ImplStatement {
     pub functions: Vec<FnStatement>,
 }
 
+impl AstNode for ImplStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct IfElseStatement {
     pub node_id: AstNodeIndex,
@@ -801,6 +1066,11 @@ pub struct IfElseStatement {
     pub else_branch: Option<Vec<Statement>>,
 }
 
+impl AstNode for IfElseStatement {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum Statement {
@@ -993,34 +1263,37 @@ impl Statement {
             expression,
         })
     }
+}
 
-    pub fn get_node_id(&self) -> AstNodeIndex {
+impl AstNode for Statement {
+    fn get_node_id(&self) -> AstNodeIndex {
         match self {
             Statement::EmptyStatement { node_id, ..} => *node_id,
-            Statement::LetStatement(x) => x.node_id,
-            Statement::StaticStatement(x) => x.node_id,
-            Statement::ConstStatement(x) => x.node_id,
-            Statement::ExpressionStatement(x) => x.node_id,
-            Statement::WhileStatement(x) => x.node_id,
-            Statement::BreakStatement(x) => x.node_id,
-            Statement::ContinueStatement(x) => x.node_id,
-            Statement::FnStatement(x) => x.node_id,
-            Statement::ReturnStatement(x) => x.node_id,
-            Statement::DeferStatement(x) => x.node_id,
-            Statement::StructStatement(x) => x.node_id,
-            Statement::ImplStatement(x) => x.node_id,
-            Statement::IfElseStatement(x) => x.node_id,
+            Statement::LetStatement(x) => x.get_node_id(),
+            Statement::StaticStatement(x) => x.get_node_id(),
+            Statement::ConstStatement(x) => x.get_node_id(),
+            Statement::ExpressionStatement(x) => x.get_node_id(),
+            Statement::WhileStatement(x) => x.get_node_id(),
+            Statement::BreakStatement(x) => x.get_node_id(),
+            Statement::ContinueStatement(x) => x.get_node_id(),
+            Statement::FnStatement(x) => x.get_node_id(),
+            Statement::ReturnStatement(x) => x.get_node_id(),
+            Statement::DeferStatement(x) => x.get_node_id(),
+            Statement::StructStatement(x) => x.get_node_id(),
+            Statement::ImplStatement(x) => x.get_node_id(),
+            Statement::IfElseStatement(x) => x.get_node_id(),
         }
     }
 }
 
+#[derive(Debug, Clone)]
 pub enum Ast {
     Expression(Expression),
     Statement(Statement)
 }
 
-impl Ast {
-    pub fn get_node_id(&self) -> AstNodeIndex {
+impl AstNode for Ast {
+    fn get_node_id(&self) -> AstNodeIndex {
         match self {
             Self::Expression(x) => x.get_node_id(),
             Self::Statement(x) => x.get_node_id(),
