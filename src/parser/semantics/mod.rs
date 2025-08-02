@@ -7,6 +7,7 @@ use crate::parser::semantics::traits::{AstContext, ContextMapper, Semantics};
 use crate::syntax::ast::{current_id, Ast, AstNodeIndex, Context, Statement};
 // use crate::typing::type_validation::TypeValidationContext;
 use std::rc::Rc;
+use crate::compiler::c_transpiler::CTranspilerContext;
 use crate::parser::semantics::flatten_tree::ParserContext;
 
 pub mod scopes;
@@ -68,6 +69,26 @@ impl ContextMapper<FirstSemanticsPassContext> for SecondSemanticsPassContext {
         Self::from_first_pass(from)
     }
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct TranspilerPassContext {
+    pub first_pass: FirstSemanticsPassContext,
+    pub second_pass: SecondSemanticsPassContext,
+    pub transpile: CTranspilerContext,
+}
+
+impl AstContext for TranspilerPassContext {}
+
+impl ContextMapper<SecondSemanticsPassContext> for TranspilerPassContext {
+    fn map(from: SecondSemanticsPassContext) -> Self {
+        Self {
+            first_pass: from.first_pass.clone(),
+            second_pass: from,
+            transpile: CTranspilerContext::default(),
+        }
+    }
+}
+
 
 pub struct SemanticsAnalyzer<'a, SharedContext>
 where

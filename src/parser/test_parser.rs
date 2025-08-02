@@ -5,6 +5,7 @@ use crate::utils::test_utils::*;
 use crate::syntax::tokens::*;
 use crate::syntax::ast::*;
 use crate::*;
+use crate::compiler::c_transpiler::CTranspilerSemantics;
 use crate::parser::semantics::scope_resolving::ScopeResolvingSemantics;
 use crate::parser::semantics::SecondSemanticsPassContext;
 
@@ -403,8 +404,11 @@ pub fn test_semantics(#[case] source_code: &'static str) {
     let ast_context = ParserContext::default()
         .analyze_by(flatten_tree_analyzer)
         .then_analyze_by(semantic_analyzer)
-        .then_analyze_by(second_semantic_analyzer);
-
+        .then_analyze_by(second_semantic_analyzer)
+        .then_analyze_by(
+            SemanticsAnalyzer::new(&statements)
+                .with_semantics::<CTranspilerSemantics>()
+        );
     if current_id() != AstNodeIndex(ast_context.first_pass.parser.ast_nodes.len()) {
         let mut kv: Vec<_> = ast_context
             .first_pass

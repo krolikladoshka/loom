@@ -21,6 +21,7 @@ use crate::parser::semantics::name_scoping::{NameScopingContext, NameScopingSema
 use std::fs::{read_to_string, File};
 use std::io::Write;
 use std::path::Path;
+use crate::compiler::c_transpiler::CTranspilerSemantics;
 use crate::parser::semantics::flatten_tree::ParserContext;
 use crate::parser::semantics::scope_resolving::ScopeResolvingSemantics;
 
@@ -117,39 +118,14 @@ fn main() {
         )
         .then_analyze_by(
             second_pass
+        ).then_analyze_by(
+            SemanticsAnalyzer::new(&parser_results)
+                .with_semantics::<CTranspilerSemantics>()
         );
 
     println!("{:?}", ast_context);
-    // let ast_context = analyzer.analyze();
-
-    // println!("{:?}", ast_context);
-
-    // println!("{}", ast_context.transpile.result);
-    // let mut file = File::create("./loom_runtime/main.c").unwrap();
-    // file.write_all(ast_context.transpile.result.as_bytes()).unwrap();
-    // file.flush().unwrap();
-    //
-    // println!("{}", ast_context.transpile.transpile_results.len());
-
-    // let (ast, error) = parser.parse();
-    // 
-    // match error {
-    //     Some(e) => for q in e {
-    //         println!("{}", q);
-    //     }
-    //     None => {}
-    // };
-    // 
-    // println!("{}", ast.print_tree(0))
-    enum AstNode {
-        Expression(Expression),
-        Statement(Statement),
-    }
-    // let mut arena = Vec::with_capacity(current_id());
-    // arena.push(RefCell::new(parser.parse_next()));
-    // let mut transpiler = CTranspiler::new(&mut parser);
-    //
-    // let result = transpiler.transpile();
-    
-    // println!("{}", result);
+    println!("{}", ast_context.transpile.result);
+    let mut file = File::create("./loom_runtime/transpiled.c").unwrap();
+    file.write_all(ast_context.transpile.result.as_bytes()).unwrap();
+    file.flush().unwrap();
 }
