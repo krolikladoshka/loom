@@ -1,23 +1,37 @@
 use crate::parser::semantics::SemanticsAnalyzer;
 // TODO: do something with formatter and linter to wrap uses to new lines or use use stmt per line
-use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Function, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, Unary, WhileStatement};
+use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, Ast, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Function, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, TypeAnnotation, TypedDeclaration, Unary, WhileStatement};
 use crate::syntax::lexer::Token;
 
 
 pub trait AstContext: Sized {
     // type Output: Default;
+    
+    fn analyze_by(
+        self,
+        pass: SemanticsAnalyzer<Self>
+    ) -> Self {
+        pass.analyze_with_context(self)
+    }
 
-    fn then_analyze_by<NextContext, Mapper>(
+    fn then_analyze_by<NextContext>(
         self,
         next_pass: SemanticsAnalyzer<NextContext>,
-        mapper: Mapper
     ) -> NextContext
     where
-        NextContext: AstContext,
-        Mapper: FnOnce(Self) -> NextContext
+        // PreviousContext: AstContext,
+        NextContext: AstContext + ContextMapper<Self>,
+    //     Mapper: FnOnce(Self) -> NextContext
     {
-        next_pass.analyze_with_context(mapper(self))
+        next_pass.analyze_with_context(NextContext::map(self))
     }
+}
+
+pub trait ContextMapper<FromContext>
+where
+    FromContext: AstContext,
+{
+    fn map(from: FromContext) -> Self;
 }
 
 pub trait Semantics<SharedContext>
@@ -97,6 +111,10 @@ where
         if let Some(initializer) = &let_statement.initializer {
             self.visit_expression(&initializer, context);
         }
+        
+        if let Some(type_annotation) = &let_statement.variable_type {
+            self.visit_type_annotation(type_annotation, context);
+        }
     }
 
     fn visit_static_statement_default(
@@ -105,6 +123,7 @@ where
         context: &mut SharedContext,
     ) {
         self.visit_expression(&static_statement.initializer, context);
+        self.visit_type_annotation(&static_statement.variable_type, context);
     }
 
     fn visit_const_statement_default(
@@ -113,6 +132,7 @@ where
         context: &mut SharedContext,
     ) {
         self.visit_expression(&const_statement.initializer, context);
+        self.visit_type_annotation(&const_statement.variable_type, context);
     }
 
     fn visit_expression_statement_default(
@@ -141,6 +161,13 @@ where
         context: &mut SharedContext,
     )
     {
+        function.arguments.iter().for_each(|typed_declaration|
+            self.visit_typed_declaration(typed_declaration, context)
+        );
+        
+        if let Some(type_annotation) = &function.return_type {
+            self.visit_type_annotation(type_annotation, context);
+        }
         self.visit_all_statements(&function.body, context);
     }
 
@@ -151,6 +178,13 @@ where
         context: &mut SharedContext,
     )
     {
+        method.arguments.iter().for_each(|typed_declaration|
+            self.visit_typed_declaration(typed_declaration, context)
+        );
+
+        if let Some(type_annotation) = &method.return_type {
+            self.visit_type_annotation(type_annotation, context);
+        }
         self.visit_all_statements(&method.body, context);
     }
 
@@ -185,6 +219,16 @@ where
         context: &mut SharedContext,
     ) {
         self.visit_expression(&defer_statement.call_expression, context)
+    }
+
+    fn visit_struct_statement_default(
+        &self,
+        struct_statement: &StructStatement,
+        context: &mut SharedContext,
+    ) {
+        struct_statement.fields.iter().for_each(|struct_field|
+            self.visit_typed_declaration(struct_field, context)
+        );
     }
 
     fn visit_impl_statement_default(
@@ -317,6 +361,7 @@ where
     )
     {
         self.visit_expression(&cast.left, context);
+        self.visit_type_annotation(&cast.target_type, context);
     }
     
     fn visit_binary_default(
@@ -502,10 +547,12 @@ where
     }
 
     fn visit_struct_statement(
-        &self,
-        _struct_statement: &StructStatement,
-        _context: &mut SharedContext,
-    ) {}
+        &self, 
+        struct_statement: &StructStatement,
+        context: &mut SharedContext,
+    ) {
+        self.visit_struct_statement_default(struct_statement, context);
+    }
 
     fn visit_impl_statement(
         &self,
@@ -680,5 +727,22 @@ where
         context: &mut SharedContext,
     ) {
         self.visit_struct_initializer_default(struct_initializer, context);
+    }
+    
+    fn visit_type_annotation(
+        &self,
+        _type_annotation: &TypeAnnotation,
+        _context: &mut SharedContext,
+    ) {}
+    
+    fn visit_typed_declaration(
+        &self,
+        type_declaration: &TypedDeclaration,
+        context: &mut SharedContext,
+    ) {
+        self.visit_type_annotation(
+            &type_declaration.declared_type,
+            context,
+        );
     }
 }

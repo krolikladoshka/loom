@@ -67,6 +67,24 @@ pub enum NumericType {
     Function(Box<FunctionType>),
 }
 
+impl NumericType {
+}
+pub fn is_basic_type(name: &str) -> bool {
+    static BASIC_TYPES: [&'static str; 15] = [
+        "i8", "i16",
+        "i32", "i64",
+        "u8", "u16",
+        "u32", "u64",
+        "f32", "f64",
+        "usize", "char",
+        "string", "cstring",
+        "bool",
+    ];
+    
+    BASIC_TYPES.contains(&name)
+}
+
+
 pub struct Type {
     pub ttype: NumericType,
     pub mutable: bool,

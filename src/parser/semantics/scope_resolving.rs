@@ -1,11 +1,19 @@
+use std::any::Any;
+use crate::parser::semantics::name_scoping::Scope;
 use crate::parser::semantics::SecondSemanticsPassContext;
 use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, AstNode, AstNodeIndex, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Function, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, TypeName, Unary, WhileStatement};
+use crate::syntax::ast::{ArraySlice, ArrowAccess, Assignment, AstNode, AstNodeIndex, Binary, BlockExpression, BreakStatement, Call, Cast, ConstStatement, ContinueStatement, DeferStatement, DotAccess, Expression, ExpressionStatement, FnExpression, FnStatement, Function, Grouping, Identifier, IfElseExpression, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, Range, ReturnStatement, SelfExpression, Statement, StaticStatement, StructInitializer, StructStatement, TypeAnnotation, TypeName, TypedDeclaration, Unary, WhileStatement};
+use crate::typing::literal_typing::is_basic_type;
 
+#[derive(Default)]
 pub struct ScopeResolvingSemantics;
 
-impl ScopeResolvingSemantics {
+enum TypeDefinitionValidationError {
+    ScopeNotFound,
+    StructNotFound,
+}
 
+impl ScopeResolvingSemantics {
     pub fn get_ast_node(&self, context: &SecondSemanticsPassContext, ast_node: AstNodeIndex) {
     }
     pub fn get_node_scope_id<T>(
@@ -21,7 +29,7 @@ impl ScopeResolvingSemantics {
             .first_pass
             .name_scoping
             .local_scopes
-            .scope_id_by_node_index.get(ast_node.get_node_id().0)
+            .scope_id_by_node_index.get(ast_node.get_node_id())
             .cloned()
     }
 
@@ -33,7 +41,7 @@ impl ScopeResolvingSemantics {
             .first_pass
             .name_scoping
             .local_scopes
-            .scope_id_by_node_index.get(expression.get_node_id().0)
+            .scope_id_by_node_index.get(expression.get_node_id())
             .cloned()
     }
 
@@ -45,7 +53,7 @@ impl ScopeResolvingSemantics {
             .first_pass
             .name_scoping
             .local_scopes
-            .scope_id_by_node_index.get(statement.get_node_id().0)
+            .scope_id_by_node_index.get(statement.get_node_id())
             .cloned()
     }
 
@@ -54,6 +62,40 @@ impl ScopeResolvingSemantics {
     ) -> Option<usize> {
         // let scope_id = self.expression_scope_id(context, expression)?;
         None
+    }
+    
+    fn find_name_from_scope<'a>(
+        &self,
+        context: &'a SecondSemanticsPassContext,
+        scope_id: usize,
+        name: &String
+    ) -> Option<(usize, &'a Scope)> {
+        context
+            .first_pass
+            .name_scoping
+            .local_scopes
+            .find_from_scope(scope_id, name)
+    }
+    fn validate_type_definition(
+        &self,
+        type_annotation: &TypeAnnotation,
+        context: &SecondSemanticsPassContext,
+    ) -> Result<(), TypeDefinitionValidationError> {
+        let type_name = type_annotation.get_type_name();
+        
+        if is_basic_type(type_name) {
+            return Ok(());
+        }
+        
+        let Some(scope_id) = self.get_node_scope_id(context, type_annotation) else {
+            return Err(TypeDefinitionValidationError::ScopeNotFound);
+        };
+        
+        if let Some(_) = self.find_name_from_scope(context, scope_id, type_name) {
+            return Ok(())
+        }
+        
+        Err(TypeDefinitionValidationError::StructNotFound)
     }
 }
 
@@ -71,18 +113,24 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
 
     fn visit_static_statement(
         &self,
-        _static_statement: &StaticStatement,
-        _context: &mut SecondSemanticsPassContext,
+        static_statement: &StaticStatement,
+        context: &mut SecondSemanticsPassContext,
     ) {
-        self.visit_static_statement_default();
+        self.visit_static_statement_default(
+            static_statement,
+            context,
+        );
     }
 
     fn visit_const_statement(
         &self,
-        _const_statement: &ConstStatement,
-        _context: &mut SecondSemanticsPassContext,
+        const_statement: &ConstStatement,
+        context: &mut SecondSemanticsPassContext,
     ) {
-        self.visit_const_statement_default();
+        self.visit_const_statement_default(
+            const_statement,
+            context,
+        );
     }
 
     fn visit_while_statement(
@@ -252,23 +300,28 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
         context: &mut SecondSemanticsPassContext,
     )
     {
-        let Some(scope_id) = self.get_node_scope_id(context, &cast.target_type) else {
-            panic!(
-                "target type {:?} in type cast {} is not defined in name table",
-                cast.target_type,
-                cast.token
-            );
-        };
-        if let None = context.first_pass.name_scoping.local_scopes.find_from_scope(
-            scope_id,
-            cast.target_type.get_type_name()
-        ) {
-            panic!(
-                "target type {:?} in type cast {} is not found in current scope",
-                cast.target_type,
-                cast.token
-            );
-        }
+        // match self.validate_type_definition(&cast.target_type, context) {
+        //     Ok(_) =>
+        //         self.visit_cast_default(cast, context),
+        //     
+        // }
+        // let Some(scope_id) = self.get_node_scope_id(context, &cast.target_type) else {
+        //     panic!(
+        //         "target type {:?} in type cast {} is not defined in name table",
+        //         cast.target_type,
+        //         cast.token
+        //     );
+        // };
+        // if let None = context.first_pass.name_scoping.local_scopes.find_from_scope(
+        //     scope_id,
+        //     cast.target_type.get_type_name()
+        // ) {
+        //     panic!(
+        //         "target type {:?} in type cast {} is not found in current scope",
+        //         cast.target_type,
+        //         cast.token
+        //     );
+        // }
 
         self.visit_cast_default(cast, context);
     }
@@ -335,21 +388,25 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
 
     fn visit_fn_expression(
         &self,
-        _fn_expression: &FnExpression,
-        _context: &mut SecondSemanticsPassContext,
-    ) {}
+        fn_expression: &FnExpression,
+        context: &mut SecondSemanticsPassContext,
+    ) {
+        self.visit_fn_expression_default(fn_expression, context);
+    }
 
     fn visit_struct_initializer(
         &self,
         struct_initializer: &StructInitializer,
         context: &mut SecondSemanticsPassContext,
     ) {
+        
         let Some(scope_id) = self.get_node_scope_id(context, struct_initializer) else {
             panic!(
                 "struct {} in struct initializer {} is not defined in name table",
                 struct_initializer.struct_name.lexeme, struct_initializer.token
             );
         };
+
 
         let Some((_, struct_scope)) = context
             .first_pass
@@ -364,7 +421,6 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
                 struct_initializer.struct_name.lexeme, struct_initializer.token
             );
         };
-
         let Some(initialized_struct_id) = struct_scope.structs.get(
             &struct_initializer.struct_name.lexeme
         ) else {
@@ -373,14 +429,49 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
                 struct_initializer.struct_name.lexeme, struct_initializer.token
             );
         };
-
-        let Some(struct_node) = context.parser.get_struct(*initialized_struct_id) else {
-            panic
+        
+        let Some(struct_node) = context
+            .first_pass
+            .parser
+            .get_struct(*initialized_struct_id)
+        else {
+            panic!(
+                "struct {} in struct initializer {} is not defined",
+                struct_initializer.struct_name.lexeme, struct_initializer.token
+            );
+        };
+        
+        for (field_name, _) in &struct_initializer.field_initializers {
+            if struct_node.fields.iter()
+                .any(|field| field.name.lexeme != field_name.lexeme)
+            {
+                panic!(
+                    "field {} is not found in struct {}; {}",
+                    field_name.lexeme, struct_node.name, struct_initializer.token 
+                );
+            }
         }
 
-        for (field_name, field_initializer) in &struct_initializer.field_initializers {
-            self.visit_expression(field_initializer, context);
-            initialized_struct.
+        self.visit_struct_initializer_default(struct_initializer, context);
+    }
+
+    fn visit_type_annotation(
+        &self,
+        type_annotation: &TypeAnnotation,
+        context: &mut SecondSemanticsPassContext
+    ) {
+        match self.validate_type_definition(type_annotation, context) {
+            Err(TypeDefinitionValidationError::ScopeNotFound) =>
+                panic!(
+                    "type {:?} is not defined in name table",
+                    type_annotation
+                ),
+            Err(TypeDefinitionValidationError::StructNotFound) =>
+                panic!(
+                    "type {:?} is not found from current scope",
+                    type_annotation
+                ),
+            _ => {}
         }
     }
 }

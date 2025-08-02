@@ -4,6 +4,7 @@ pub mod typing;
 pub mod syntax;
 pub mod utils;
 
+use crate::parser::semantics::flatten_tree::FlattenTree;
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 // use crate::compiler::c_transpiler::{CTranspilerContext, CTranspilerSemantics};
@@ -20,6 +21,8 @@ use crate::parser::semantics::name_scoping::{NameScopingContext, NameScopingSema
 use std::fs::{read_to_string, File};
 use std::io::Write;
 use std::path::Path;
+use crate::parser::semantics::flatten_tree::ParserContext;
+use crate::parser::semantics::scope_resolving::ScopeResolvingSemantics;
 
 pub struct Test {
     pub field: i32,
@@ -36,12 +39,12 @@ fn test() {
 //     pub transpile: CTranspilerContext
 // }
 // impl AstContext for SecondSemanticsPassContext {
-//     // type Output = (); 
+//     // type Output = ();
 // }
-// impl AstContext for ThirdSemanticsPassContext<'_> { 
-//     // type Output = (); 
+// impl AstContext for ThirdSemanticsPassContext<'_> {
+//     // type Output = ();
 // }
-// 
+//
 // struct SecondSemanticsPass;
 // impl Semantics<SecondSemanticsPassContext<'_>> for SecondSemanticsPass {}
 
@@ -65,7 +68,7 @@ struct Testq {
 
 impl Referenced<'_> for Testq {
     fn on_ref(&self, q: &i32) -> i32 {
-        q.clone() + self.field 
+        q.clone() + self.field
     }
 }
 
@@ -92,52 +95,29 @@ fn main() {
      */
     let (_, errors, parser_results ) = parser.parse();
 
-    let flow_control_semantics = FlowControlSemantics {};
-    let name_scoping_semantics = NameScopingSemantics {};
+    let flatten_tree_constructor = SemanticsAnalyzer::new(
+        &parser_results
+    )
+        .with_semantics::<FlattenTree>();
     let first_pass = SemanticsAnalyzer::new(
         &parser_results
     )
-        .with(flow_control_semantics)
-        .with(name_scoping_semantics);
-    // let second_pass = SemanticsAnalyzer::new(
-    //     &parser_results
-    // )
-    //     .with(name_table_semantics);
-        // .with(type_validation_semantics);
-    
+        .with_semantics::<FlowControlSemantics>()
+        .with_semantics::<NameScopingSemantics>();
+    let second_pass = SemanticsAnalyzer::new(
+        &parser_results
+    )
+        .with_semantics::<ScopeResolvingSemantics>();
+        // .with_semantics::<TypingSemantics>();
 
-    // let scope_resolving_semantics = NameResolvingSemantics {};
-    // let typing_validation_semantics = TypingValidationSemantics {};
-    // let second_pass = SemanticsAnalyzer::new(
-    //     &parser_results
-    // )
-    //     .with(scope_resolving_semantics)
-        // .with(typing_validation_semantics);
-
-    // let c_transpiler_semantics = CTranspilerSemantics {};
-    // let third_pass = SemanticsAnalyzer::new(
-    //     &parser_results
-    // )
-    //     .with(c_transpiler_semantics);
-    
-    let ast_context = FirstSemanticsPassContext::default()
-        .then_analyze_by(first_pass, |x| x);
-        // .then_analyze_by(second_pass, SecondSemanticsPassContext::from_first_pass);
-        // .then_analyze_by(
-        //     second_pass,
-        //     |mut first_context| SecondSemanticsPassContext {
-        //         first_semantics_pass_context: first_context,
-        //         new_data: vec![]
-        //     }
-        // )
-        // .then_analyze_by(
-        //     third_pass,
-        //     |mut second_context| ThirdSemanticsPassContext {
-        //         first_semantics_pass_context: &mut second_context.first_semantics_pass_context,
-        //         second_semantics_pass_context: second_context,
-        //         transpile: Default::default(),
-        //     }
-        // );
+    let ast_context = ParserContext::default()
+        .analyze_by(flatten_tree_constructor)
+        .then_analyze_by(
+            first_pass
+        )
+        .then_analyze_by(
+            second_pass
+        );
 
     println!("{:?}", ast_context);
     // let ast_context = analyzer.analyze();
@@ -148,7 +128,7 @@ fn main() {
     // let mut file = File::create("./loom_runtime/main.c").unwrap();
     // file.write_all(ast_context.transpile.result.as_bytes()).unwrap();
     // file.flush().unwrap();
-    // 
+    //
     // println!("{}", ast_context.transpile.transpile_results.len());
 
     // let (ast, error) = parser.parse();

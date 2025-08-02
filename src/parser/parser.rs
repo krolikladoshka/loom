@@ -8,22 +8,17 @@ use crate::dev_assert;
 
 pub type ParserResult<T> = Result<T, ParserError>;
 
-pub enum AstRef<'a> {
-    Expression(&'a Expression),
-    Statement(&'a Statement)
-}
 
-pub struct Parser<'a> {
+pub struct Parser {
     pub tokens: Vec<Token>,
     start_position: usize,
     current_position: usize,
     pub(crate) panic_on_error: bool,
     node_id_counter: AstNodeIndex,
-    pub ast_nodes: HashMap<AstNodeIndex, AstRef<'a>>
 }
 
 
-impl<'a> Parser<'a> {
+impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Self {
             tokens,
@@ -31,7 +26,6 @@ impl<'a> Parser<'a> {
             current_position: 0,
             panic_on_error: false,
             node_id_counter: AstNodeIndex(0),
-            ast_nodes: HashMap::with_capacity(100),
         }
     }
     
@@ -1022,6 +1016,8 @@ impl<'a> Parser<'a> {
         let mut top_level_statements = vec![];
         let mut impl_statements = vec![];
         loop {
+            self.advance_skipping_comments();
+            
             let Some(def_token) = self.peek() else {
                 return Err(self.wrap_error(ParserError::unexpected_eof(
                     TokenType::Identifier,
@@ -1952,11 +1948,7 @@ impl<'a> Parser<'a> {
 
     #[inline(always)]
     pub fn parse_expression(&mut self) -> ParserResult<Expression> {
-        // self.ranges()
-        let expression = self.parse_assignment()?;
-        self.ast_nodes.insert(expression.get_node_id(), AstRef::Expression(&expression));
-
-        Ok(expression)
+        self.parse_assignment()
     }
 
     fn primary_before_block(&mut self) -> ParserResult<Expression> {

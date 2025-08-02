@@ -3,8 +3,8 @@ use crate::parser::errors::ParserError;
 use crate::parser::parser::ParserResult;
 use crate::parser::semantics::flow_control::FlowControlContext;
 use crate::parser::semantics::name_scoping::NameScopingContext;
-use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::syntax::ast::{current_id, Ast, AstNodeIndex, Statement};
+use crate::parser::semantics::traits::{AstContext, ContextMapper, Semantics};
+use crate::syntax::ast::{current_id, Ast, AstNodeIndex, Context, Statement};
 // use crate::typing::type_validation::TypeValidationContext;
 use std::rc::Rc;
 use crate::parser::semantics::flatten_tree::ParserContext;
@@ -38,6 +38,12 @@ impl FirstSemanticsPassContext {
     }
 }
 
+impl ContextMapper<ParserContext> for FirstSemanticsPassContext {
+    fn map(from: ParserContext) -> Self {
+        Self::from_parser_context(from)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SecondSemanticsPassContext {
     pub first_pass: FirstSemanticsPassContext,
@@ -56,6 +62,12 @@ impl SecondSemanticsPassContext {
 }
 
 impl AstContext for SecondSemanticsPassContext { }
+
+impl ContextMapper<FirstSemanticsPassContext> for SecondSemanticsPassContext {
+    fn map(from: FirstSemanticsPassContext) -> Self {
+        Self::from_first_pass(from)
+    }
+}
 
 pub struct SemanticsAnalyzer<'a, SharedContext>
 where
@@ -86,7 +98,15 @@ where
 
         self
     }
-
+    
+    pub fn with_semantics<T: Semantics<SharedContext> + Default + 'static>(
+        mut self
+    ) -> Self {
+        self.analyzers.push(Rc::new(T::default()));
+        
+        self
+    }
+    
     pub fn add<T: Semantics<SharedContext> + 'static>(
         &mut self,
         semantics: T,

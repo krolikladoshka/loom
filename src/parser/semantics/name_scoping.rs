@@ -1,7 +1,10 @@
 use crate::parser::semantics::traits::{AstContext, Semantics};
 use crate::parser::semantics::{FirstSemanticsPassContext};
-use crate::syntax::ast::{current_id, AstNode, AstNodeIndex, BlockExpression, ConstStatement, FnStatement, Function, IfElseExpression, IfElseStatement, ImplStatement, LetStatement, Method, Statement, StaticStatement, StructStatement, Type, WhileStatement};
+use crate::syntax::ast::{current_id, AstNode, AstNodeIndex, BlockExpression, ConstStatement, Expression, FnStatement, Function, IfElseExpression, IfElseStatement, ImplStatement, LetStatement, Method, Statement, StaticStatement, StructStatement, Type, TypeAnnotation, WhileStatement};
 use std::collections::HashMap;
+use std::fmt::Debug;
+use std::iter::Rev;
+use std::ops::{Index, IndexMut};
 use crate::{dev_assert, dev_assert_ne};
 use crate::parser::semantics::name_scoping::ScopeError::NameIsAlreadyDefined;
 
@@ -120,17 +123,74 @@ impl Scope {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ReverseAstNodeIndex<T>
+{
+    array: Vec<Option<T>>
+}
+
+impl<T> ReverseAstNodeIndex<T> {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            array: (0..capacity).map(|_| None).collect()
+        }
+    }
+
+    pub fn set(&mut self, ast_node_index: AstNodeIndex, value: T) {
+        dev_assert!(
+            ast_node_index.0 < self.array.len() && ast_node_index.0 >= 0,
+            "index is out of bounds of reverse index {}",
+            ast_node_index.0
+        );
+        dev_assert!(
+            self.array[ast_node_index.0].is_none(),
+            "reverse index was already set for {} entry",
+            ast_node_index
+        );
+
+        self.array[ast_node_index.0] = Some(value);
+    }
+
+    pub fn get(&self, ast_node_index: AstNodeIndex) -> Option<&T> {
+        self.array.get(ast_node_index.0)?.as_ref()
+    }
+}
+
+impl<T> Index<AstNodeIndex> for ReverseAstNodeIndex<T> {
+    type Output = T;
+
+    fn index(&self, index: AstNodeIndex) -> &Self::Output {
+        assert!(
+            index.0 < self.array.len() && index.0 >= 0,
+            "index out of bounds of reverse index"
+        );
+        dev_assert!(
+            self.array[index.0].is_some(),
+            "reverse index contains empty values: {}",
+            index.0
+        );
+
+        self.array[index.0].as_ref().unwrap()
+    }
+}
+
+impl<T> Default for ReverseAstNodeIndex<T> {
+    fn default() -> Self {
+        Self::with_capacity(current_id().into())
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ScopeTree {
     pub tree: Vec<usize>,
     pub scopes: Vec<Scope>,
-    pub scope_id_by_node_index: Vec<usize>
+    pub scope_id_by_node_index: ReverseAstNodeIndex<usize>
 }
 
 enum ScopeError {
     NameIsAlreadyDefined,
 }
+
 type ScopeResult = Result<(), ScopeError>;
 
 impl ScopeTree {
@@ -143,7 +203,7 @@ impl ScopeTree {
         Self {
             tree: vec![0],
             scopes: scopes_vec,
-            scope_id_by_node_index: vec![0; current_id().into()],
+            scope_id_by_node_index: ReverseAstNodeIndex::default()
         }
     }
 
@@ -155,6 +215,11 @@ impl ScopeTree {
         );
 
         self.scopes[scope_id].variables.contains_key(name)
+    }
+
+    #[inline(always)]
+    fn set_reverse_index<T: AstNode>(&mut self, node: &T, scope: usize) {
+        self.scope_id_by_node_index.set(node.get_node_id(), scope);
     }
 
     pub fn add_variable(
@@ -178,7 +243,7 @@ impl ScopeTree {
             .entry(variable_name)
             .or_default()
             .push(variable_node_id);
-        self.scope_id_by_node_index[variable_node_id.0] = scope_id;
+        self.scope_id_by_node_index.set(variable_node_id, scope_id);
     }
 
     pub fn add_const(&mut self, scope_id: usize, const_variable: &ConstStatement) -> ScopeResult {
@@ -198,7 +263,7 @@ impl ScopeTree {
         self.scopes[scope_id].const_declarations.insert(
             const_variable.name.lexeme.clone(), const_variable.node_id
         );
-        self.scope_id_by_node_index[const_variable.node_id.0] = scope_id;
+        self.scope_id_by_node_index.set(const_variable.node_id, scope_id);
 
         Ok(())
     }
@@ -225,7 +290,7 @@ impl ScopeTree {
         self.scopes[scope_id].const_declarations.insert(
             static_variable.name.lexeme.clone(), static_variable.node_id
         );
-        self.scope_id_by_node_index[static_variable.node_id.0] = scope_id;
+        self.scope_id_by_node_index.set(static_variable.node_id, scope_id);
 
         Ok(())
     }
@@ -247,7 +312,7 @@ impl ScopeTree {
             function.name.lexeme.clone(),
             function_node_id
         );
-        self.scope_id_by_node_index[function_node_id.0] = scope_id;
+        self.scope_id_by_node_index.set(function_node_id, scope_id);
 
         Ok(())
     }
@@ -450,6 +515,7 @@ impl FirstSemanticsPassContext {
     }
 }
 
+#[derive(Default)]
 pub struct NameScopingSemantics;
 
 impl AstContext for NameScopingContext { }
@@ -487,7 +553,19 @@ impl NameScopingSemantics {
 
 impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
     fn visit_statement(&self, statement: &Statement, context: &mut FirstSemanticsPassContext) {
-        self.visit_statement_default(statement, context)
+        self.visit_statement_default(statement, context);
+
+        match statement {
+            Statement::LetStatement(_) | Statement::FnStatement(_) |
+            Statement::StructStatement(_) | Statement::StaticStatement(_) |
+            Statement::ConstStatement(_) | Statement::ImplStatement(_) => {
+                /* already set */
+            },
+            statement =>
+                context.name_scoping.local_scopes.set_reverse_index(
+                    statement, context.name_scoping.current_scope
+                )
+        }
     }
 
     fn visit_let_statement(
@@ -498,6 +576,7 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
     {
         dev_assert_ne!(context.current_scope, 0);
         self.visit_let_statement_default(let_statement, context);
+
         let local_scopes = &mut context.name_scoping.local_scopes;
         // let scope = context.name_resolving.get_current_scope_mut();
 
@@ -522,14 +601,23 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
         context: &mut FirstSemanticsPassContext
     )
     {
+        self.visit_static_statement_default(static_statement, context);
+
         if let Err(NameIsAlreadyDefined) = context.name_scoping.local_scopes.add_static(
             context.name_scoping.current_scope,
             static_statement
         ) {
             panic!("can't redefine static variables in same scope");
         }
+        // self.visit_expression(&static_statement.initializer, context);
+    }
 
-        self.visit_expression(&static_statement.initializer, context);
+    fn visit_expression(&self, expression: &Expression, context: &mut FirstSemanticsPassContext) {
+        self.visit_expression_default(expression, context);
+
+        context.name_scoping.local_scopes.set_reverse_index(
+            expression, context.name_scoping.current_scope
+        );
     }
 
     fn visit_const_statement(
@@ -538,6 +626,8 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
         context: &mut FirstSemanticsPassContext
     )
     {
+        self.visit_const_statement_default(const_statement, context);
+
         if let Err(NameIsAlreadyDefined) = context.name_scoping.local_scopes.add_const(
             context.name_scoping.current_scope,
             const_statement,
@@ -545,7 +635,7 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
             panic!("can't redefine const variables in same scope");
         }
 
-        self.visit_expression(&const_statement.initializer, context);
+        // self.visit_expression(&const_statement.initializer, context);
     }
 
     fn visit_while_statement(&self, while_statement: &WhileStatement, context: &mut FirstSemanticsPassContext) {
@@ -743,6 +833,10 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
 
         // TODO: define struct names for further type validation
         scope.structs.insert(struct_statement.name.lexeme.clone(), struct_statement.get_node_id());
+        context.name_scoping.local_scopes.set_reverse_index(
+            struct_statement, context.name_scoping.current_scope
+        );
+        self.visit_struct_statement_default(struct_statement, context);
     }
 
     fn visit_impl_statement(
@@ -798,6 +892,9 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
             context.name_scoping.current_scope,
         ));
 
+        context.name_scoping.local_scopes.set_reverse_index(
+            impl_statement, context.name_scoping.current_scope
+        );
         let prev_impl_block_flag = context.name_scoping.is_within_impl_block;
         context.name_scoping.is_within_impl_block = true;
         // context.with_new_naming_scope(|context|
@@ -827,6 +924,16 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
     fn visit_block_expression(&self, block: &BlockExpression, context: &mut FirstSemanticsPassContext) {
         context.with_new_naming_scope(|context|
             self.visit_block_expression_default(block, context)
+        );
+    }
+
+    fn visit_type_annotation(
+        &self,
+        type_annotation: &TypeAnnotation,
+        context: &mut FirstSemanticsPassContext
+    ) {
+        context.name_scoping.local_scopes.set_reverse_index(
+            type_annotation, context.name_scoping.current_scope
         );
     }
 }

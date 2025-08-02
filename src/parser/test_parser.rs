@@ -5,6 +5,7 @@ use crate::utils::test_utils::*;
 use crate::syntax::tokens::*;
 use crate::syntax::ast::*;
 use crate::*;
+use crate::parser::semantics::scope_resolving::ScopeResolvingSemantics;
 use crate::parser::semantics::SecondSemanticsPassContext;
 
 pub fn assert_tree_eq(
@@ -55,7 +56,7 @@ pub fn assert_tree_eq(
                     ttypedecl!("test_field_bool", TokenType::Bool),
                     ttypedecl!("test_field_char", TokenType::Char),
                 ]
-            ) 
+            )
         ]
     )
 ]
@@ -236,7 +237,7 @@ pub fn assert_tree_eq(
                     body: vec![
                         Statement::new_return(
                             ttoken(TokenType::Return, "return", ""),
-                            Some(Box::new(tbinary!("a", TokenType::Star, "b"))),
+                            Some(Box::new(tbinary!("a_i32", TokenType::Star, "b_i64"))),
                         )
                     ],
                 })
@@ -388,23 +389,64 @@ pub fn test_semantics(#[case] source_code: &'static str) {
     let mut parser = create_test_parser(source_code);
     parser.panic_on_error = true;
     let (_, _, statements) = parser.parse();
-    
-    let flow_control_semantics = FlowControlSemantics {};
-    let name_scoping_semantics = NameScopingSemantics {};
-    
+
+    let flatten_tree_analyzer = SemanticsAnalyzer::new(&statements)
+        .with_semantics::<FlattenTree>();
     let semantic_analyzer = SemanticsAnalyzer::new(&statements)
-        .with(flow_control_semantics)
-        .with(name_scoping_semantics);
-    
+        .with_semantics::<FlowControlSemantics>()
+        .with_semantics::<NameScopingSemantics>();
+    let second_semantic_analyzer = SemanticsAnalyzer::new(&statements)
+        .with_semantics::<ScopeResolvingSemantics>();
     // let second_pass_analyzer = SemanticsAnalyzer::new(&statements)
     //     .with(name_resolving_semanti);
 
-    let _ast_context = semantic_analyzer.analyze_with_context(
-        FirstSemanticsPassContext::default());
-    // ).then_analyze_by(
-    //     second_pass_analyzer,
-    //     SecondSemanticsPassContext::from_first_pass
-    // );
+    let ast_context = ParserContext::default()
+        .analyze_by(flatten_tree_analyzer)
+        .then_analyze_by(semantic_analyzer)
+        .then_analyze_by(second_semantic_analyzer);
+
+    if current_id() != AstNodeIndex(ast_context.first_pass.parser.ast_nodes.len()) {
+        let mut kv: Vec<_> = ast_context
+            .first_pass
+            .parser
+            .ast_nodes
+            .iter()
+            .collect();
+        kv.sort_by(|a, b| a.0.0.cmp(&b.0.0));
+
+        println!("Skipped nodes:");
+        for i in 1..kv.len() {
+            if kv[i].0.0 - kv[i - 1].0.0 > 1 {
+                println!("skip:");
+                if i - 3 < kv.len() {
+                    println!("key: {}\n\t{:?}", kv[i - 3].0, kv[i - 3].1);
+                }
+                if i - 2 < kv.len() {
+                    println!("key: {}\n\t{:?}", kv[i - 2].0, kv[i - 2].1);
+                }
+                println!("key: {}\n\t{:?}", kv[i - 1].0, kv[i - 1].1);
+                println!("key: {}\n\t{:?}", kv[i].0, kv[i].1);
+
+                if i + 1 < kv.len() {
+                    println!("key: {}\n\t{:?}", kv[i + 1].0, kv[i + 1].1);
+                }
+                println!("skip end");
+            }
+        }
+
+        println!("all nodes:");
+        for (key, value) in kv {
+            println!(
+                "key: {}\n\t{:?}",
+                key, value
+            );
+        }
+    }
+    assert_eq!(
+        current_id().0,
+        ast_context.first_pass.parser.ast_nodes.len(),
+        "test"
+    );
 
     println!("done {}", source_code);
 }

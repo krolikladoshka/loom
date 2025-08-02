@@ -71,6 +71,7 @@ impl FirstSemanticsPassContext {
     }
 }
 
+#[derive(Default)]
 pub struct FlowControlSemantics;
 
 impl FlowControlSemantics {

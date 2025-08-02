@@ -1,8 +1,12 @@
+use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 
 use crate::syntax::lexer::Token;
 
-static mut AST_ID_COUNTER: usize = 0;
+thread_local! {
+    static AST_ID_COUNTER: RefCell<usize> = RefCell::new(0);
+    // static mut AST_ID_COUNTER: usize = 0;
+}
 
 pub trait AstNode {
     fn get_node_id(&self) -> AstNodeIndex;
@@ -39,11 +43,12 @@ impl Into<usize> for AstNodeIndex {
 
 pub fn next_id() -> AstNodeIndex {
     let id = unsafe {
-        AST_ID_COUNTER
+        AST_ID_COUNTER.with(|c| *c.borrow())
     };
 
     unsafe {
-        AST_ID_COUNTER += 1;
+        AST_ID_COUNTER.with_borrow_mut(|counter| *counter += 1);
+        // AST_ID_COUNTER += 1;
     }
 
     AstNodeIndex(id)
@@ -51,7 +56,7 @@ pub fn next_id() -> AstNodeIndex {
 
 pub fn current_id() -> AstNodeIndex {
     unsafe {
-        AstNodeIndex(AST_ID_COUNTER)
+        AstNodeIndex(AST_ID_COUNTER.with(|s| *s.borrow()))
     }
 }
 
@@ -462,6 +467,20 @@ impl AstNode for Call {
 }
 
 #[derive(Debug, Clone)]
+pub struct BuiltinCall {
+    pub node_id: AstNodeIndex,
+    pub token: Token,
+    pub name: Token,
+    pub arguments: Vec<Expression>,
+}
+
+impl AstNode for BuiltinCall {
+    fn get_node_id(&self) -> AstNodeIndex {
+        self.node_id
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct ArraySlice {
     pub node_id: AstNodeIndex,
     pub token: Token,
@@ -659,6 +678,7 @@ pub enum Expression {
     SelfExpression(SelfExpression),
     FnExpression(FnExpression),
     StructInitializer(StructInitializer),
+    // BuiltinCall(BuiltinCall)
 }
 
 impl Expression {
@@ -1287,9 +1307,34 @@ impl AstNode for Statement {
 }
 
 #[derive(Debug, Clone)]
+pub enum Context {
+    TypeAnnotation(TypeAnnotation),
+    TypedDeclaration(TypedDeclaration),
+}
+
+impl TypeName for Context {
+    fn get_type_name(&self) -> &String {
+        match self {
+            Context::TypeAnnotation(x) => x.get_type_name(),
+            Context::TypedDeclaration(x) => x.get_type_name(),
+        }
+    }
+}
+
+impl AstNode for Context {
+    fn get_node_id(&self) -> AstNodeIndex {
+        match self {
+            Context::TypeAnnotation(x) => x.get_node_id(),
+            Context::TypedDeclaration(x) => x.get_node_id(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Ast {
     Expression(Expression),
-    Statement(Statement)
+    Statement(Statement),
+    Context(Context)
 }
 
 impl AstNode for Ast {
@@ -1297,6 +1342,7 @@ impl AstNode for Ast {
         match self {
             Self::Expression(x) => x.get_node_id(),
             Self::Statement(x) => x.get_node_id(),
+            Self::Context(x) => x.get_node_id(),
         }
     }
 }
