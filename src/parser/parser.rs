@@ -1444,15 +1444,15 @@ impl Parser {
                 token.clone(),
                 self.token_as_literal(&token)?
             ),
-            TokenType::I16Literal => Literal::new_u16(
+            TokenType::I16Literal => Literal::new_i16(
                 token.clone(),
                 self.token_as_literal(&token)?,
             ),
-            TokenType::I32Literal => Literal::new_u32(
+            TokenType::I32Literal => Literal::new_i32(
                 token.clone(),
                 self.token_as_literal(&token)?,
             ),
-            TokenType::I64Literal => Literal::new_u64(
+            TokenType::I64Literal => Literal::new_i64(
                 token.clone(),
                 self.token_as_literal(&token)?,
             ),

@@ -4,26 +4,23 @@ pub mod typing;
 pub mod syntax;
 pub mod utils;
 
-use crate::parser::semantics::flatten_tree::FlattenTree;
-use std::collections::HashMap;
-use std::fmt::{Debug, Display, Formatter};
-// use crate::compiler::c_transpiler::{CTranspilerContext, CTranspilerSemantics};
-// use crate::compiler::c_transpiler::CTranspiler;
 use crate::parser::parser::Parser;
+use crate::parser::semantics::flatten_tree::FlattenTree;
+use crate::parser::semantics::flow_control::FlowControlSemantics;
+use crate::parser::semantics::name_scoping::NameScopingSemantics;
 use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::parser::semantics::{FirstSemanticsPassContext, SecondSemanticsPassContext, SemanticsAnalyzer};
+use crate::parser::semantics::SemanticsAnalyzer;
 use crate::syntax::ast::{Expression, Statement};
 use crate::syntax::lexer::Lexer;
 use crate::syntax::traits::TreePrint;
-use crate::parser::semantics::flow_control::{FlowControlContext, FlowControlSemantics};
-use crate::parser::semantics::name_scoping::{NameScopingContext, NameScopingSemantics};
+use std::fmt::{Debug, Display};
 
-use std::fs::{read_to_string, File};
-use std::io::Write;
-use std::path::Path;
 use crate::compiler::c_transpiler::CTranspilerSemantics;
 use crate::parser::semantics::flatten_tree::ParserContext;
 use crate::parser::semantics::scope_resolving::ScopeResolvingSemantics;
+use std::fs::{read_to_string, File};
+use std::io::Write;
+use std::path::Path;
 
 pub struct Test {
     pub field: i32,

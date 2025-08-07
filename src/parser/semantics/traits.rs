@@ -444,6 +444,17 @@ where
             self.visit_expression(field_initializer, context);
         }
     }
+    
+    fn visit_typed_declaration_default(
+        &self,
+        typed_declaration: &TypedDeclaration,
+        context: &mut SharedContext,
+    ) {
+        self.visit_type_annotation(
+            &typed_declaration.declared_type,
+            context,
+        );
+    }
 
     fn visit_let_statement(
         &self,
@@ -740,9 +751,6 @@ where
         type_declaration: &TypedDeclaration,
         context: &mut SharedContext,
     ) {
-        self.visit_type_annotation(
-            &type_declaration.declared_type,
-            context,
-        );
+        self.visit_typed_declaration_default(type_declaration, context);
     }
 }

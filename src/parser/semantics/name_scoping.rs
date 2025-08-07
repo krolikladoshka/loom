@@ -89,7 +89,7 @@ impl Scope {
         scope
     }
 
-    pub fn find_in_scope(&self, name: &str) -> bool {
+    pub fn is_in_scope(&self, name: &str) -> bool {
         self.variables.contains_key(name) ||
             self.functions.contains_key(name) ||
             self.structs.contains_key(name) ||
@@ -97,6 +97,22 @@ impl Scope {
             self.const_declarations.contains_key(name)
     }
 
+    pub fn find_in_scope(&self, name: &str) -> Option<AstNodeIndex> {
+        self.variables.get(name)
+            // todo: well, it doesn't work,
+            // todo: define a new scope if a duplicated variable is found
+            .map(|v| v.last().unwrap())
+            .or_else(|| self.functions.get(name))
+            .or_else(|| self.structs.get(name))
+            .or_else(|| self.static_declarations.get(name))
+            .or_else(|| self.const_declarations.get(name))
+            .cloned()
+    }
+    
+    pub fn find_struct_in_scope(&self, name: &str) -> Option<&AstNodeIndex> {
+        self.structs.get(name)
+    }
+    
     pub fn find_in_impl_block(&self, name: &str, struct_name: &str) -> Option<&ImplBlock> {
         let impl_block = self.impl_blocks.get(struct_name)?;
 
@@ -220,6 +236,11 @@ impl ScopeTree {
     #[inline(always)]
     fn set_reverse_index<T: AstNode>(&mut self, node: &T, scope: usize) {
         self.scope_id_by_node_index.set(node.get_node_id(), scope);
+    }
+
+    #[inline(always)]
+    pub fn get_reverse_scope_index<T: AstNode>(&self, node: &T) -> Option<&usize> {
+        self.scope_id_by_node_index.get(node.get_node_id())
     }
 
     pub fn add_variable(
@@ -352,7 +373,7 @@ impl ScopeTree {
             return false;
         };
 
-        scope.find_in_scope(name)
+        scope.is_in_scope(name)
     }
 
     pub fn find_scope_index(&self, start_scope: usize, name: &str) -> Option<usize> {
@@ -827,7 +848,7 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
     {
         let scope = context.name_scoping.get_current_scope_mut();
 
-        if scope.find_in_scope(&struct_statement.name.lexeme) {
+        if scope.is_in_scope(&struct_statement.name.lexeme) {
             panic!("Struct {} is already defined in this scope", struct_statement.name.lexeme);
         }
 

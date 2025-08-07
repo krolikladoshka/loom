@@ -26,7 +26,6 @@ impl ScopeResolvingSemantics {
         T: AstNode
     {
         context
-            .first_pass
             .name_scoping
             .local_scopes
             .scope_id_by_node_index.get(ast_node.get_node_id())
@@ -38,7 +37,6 @@ impl ScopeResolvingSemantics {
         &self, context: &SecondSemanticsPassContext, expression: &Expression
     ) -> Option<usize> {
         context
-            .first_pass
             .name_scoping
             .local_scopes
             .scope_id_by_node_index.get(expression.get_node_id())
@@ -50,7 +48,6 @@ impl ScopeResolvingSemantics {
         &self, context: &SecondSemanticsPassContext, statement: &Statement
     ) -> Option<usize> {
         context
-            .first_pass
             .name_scoping
             .local_scopes
             .scope_id_by_node_index.get(statement.get_node_id())
@@ -71,7 +68,6 @@ impl ScopeResolvingSemantics {
         name: &String
     ) -> Option<(usize, &'a Scope)> {
         context
-            .first_pass
             .name_scoping
             .local_scopes
             .find_from_scope(scope_id, name)
@@ -220,7 +216,7 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
             );
         };
 
-        if let None = context.first_pass.name_scoping.local_scopes.find_from_scope(
+        if let None = context.name_scoping.local_scopes.find_from_scope(
             scope_id,
             &identifier.name.lexeme
         ) {
@@ -409,7 +405,6 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
 
 
         let Some((_, struct_scope)) = context
-            .first_pass
             .name_scoping
             .local_scopes
             .find_from_scope(
@@ -431,7 +426,6 @@ impl Semantics<SecondSemanticsPassContext> for ScopeResolvingSemantics {
         };
         
         let Some(struct_node) = context
-            .first_pass
             .parser
             .get_struct(*initialized_struct_id)
         else {

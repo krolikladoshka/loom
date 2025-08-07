@@ -69,13 +69,14 @@ pub enum TokenType {
     Plus, Minus,
     Star, Slash,
     Percent,
-
+    
+    MutRef, 
+    
     Less,
     Greater,
     Equals,
     LessEqual,
     GreaterEqual,
-    Ampersand,
 
     PlusEquals,
     MinusEquals,
@@ -150,6 +151,8 @@ pub enum TokenType {
 impl TokenType {
     pub const UNARY_OPERATORS: &'static [Self] = &[
         Self::Star,
+        Self::MutRef,
+        Self::BinaryAnd,
         Self::Minus,
         Self::LogicalNot,
         Self::BinaryInvert,
@@ -281,7 +284,7 @@ pub static DOUBLE_TOKENS: LazyLock<HashMap<char, (HashMap<char, TokenType>, Toke
                     '&' => TokenType::LogicalAnd,
                     '=' => TokenType::BinaryAndEquals
                 },
-                TokenType::Ampersand,
+                TokenType::BinaryAnd,
             ),
             '.' => (
                 hashmap! {
@@ -385,4 +388,5 @@ pub static DOUBLE_KEYWORD_TOKENS: LazyLock<HashMap<TokenType, (TokenType, TokenT
         TokenType::Union => (TokenType::Struct, TokenType::UnionStruct),
         TokenType::As => (TokenType::Raw, TokenType::AsRaw),
         TokenType::Defer => (TokenType::Block, TokenType::DeferBlock),
+        TokenType::BinaryAnd => (TokenType::Mut, TokenType::MutRef),
     });

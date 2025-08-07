@@ -17,6 +17,6 @@ fn test2(
         TestA 
 {
     (*a1 + *a1);
-    *a2 = 1u16;
+    *a2 = 1i16;
     return TestA {};
 }

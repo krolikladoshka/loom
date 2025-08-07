@@ -1,5 +1,5 @@
 fn test(a_i32: i32, b_i64: i64) -> i32 {
-    return a_i32 * b_i64;
+    return (a_i32 as i64) * b_i64;
 }
 
 struct TestA {

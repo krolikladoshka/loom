@@ -9,8 +9,8 @@ use crate::syntax::ast::{current_id, Ast, AstNodeIndex, Context, Statement};
 use std::rc::Rc;
 use crate::compiler::c_transpiler::CTranspilerContext;
 use crate::parser::semantics::flatten_tree::ParserContext;
+use crate::typing::type_validation::TypeValidationContext;
 
-pub mod scopes;
 pub mod flow_control;
 pub mod constraints;
 pub mod traits;
@@ -47,8 +47,11 @@ impl ContextMapper<ParserContext> for FirstSemanticsPassContext {
 
 #[derive(Debug, Clone, Default)]
 pub struct SecondSemanticsPassContext {
-    pub first_pass: FirstSemanticsPassContext,
-    // pub type_validation: TypeValidationContext,
+    // pub first_pass: FirstSemanticsPassContext,
+    pub parser: ParserContext,
+    pub flow_control: FlowControlContext,
+    pub name_scoping: NameScopingContext,
+    pub type_validation: TypeValidationContext,
 }
 
 impl SecondSemanticsPassContext {
@@ -56,8 +59,10 @@ impl SecondSemanticsPassContext {
         first_pass: FirstSemanticsPassContext,
     ) -> Self {
         Self {
-            first_pass,
-            // type_validation: TypeValidationContext::default(),
+            parser: first_pass.parser,
+            flow_control: first_pass.flow_control,
+            name_scoping: first_pass.name_scoping,
+            type_validation: TypeValidationContext::new(),
         }
     }
 }
@@ -72,8 +77,10 @@ impl ContextMapper<FirstSemanticsPassContext> for SecondSemanticsPassContext {
 
 #[derive(Debug, Clone, Default)]
 pub struct TranspilerPassContext {
-    pub first_pass: FirstSemanticsPassContext,
-    pub second_pass: SecondSemanticsPassContext,
+    pub parser: ParserContext,
+    pub flow_control: FlowControlContext,
+    pub name_scoping: NameScopingContext,
+    pub type_validation: TypeValidationContext, 
     pub transpile: CTranspilerContext,
 }
 
@@ -82,8 +89,10 @@ impl AstContext for TranspilerPassContext {}
 impl ContextMapper<SecondSemanticsPassContext> for TranspilerPassContext {
     fn map(from: SecondSemanticsPassContext) -> Self {
         Self {
-            first_pass: from.first_pass.clone(),
-            second_pass: from,
+            parser: from.parser,
+            flow_control: from.flow_control,
+            name_scoping: from.name_scoping,
+            type_validation: from.type_validation,
             transpile: CTranspilerContext::default(),
         }
     }

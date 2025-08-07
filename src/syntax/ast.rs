@@ -25,6 +25,12 @@ impl Display for AstNodeIndex {
     }
 }
 
+impl AstNode for AstNodeIndex {
+    fn get_node_id(&self) -> AstNodeIndex {
+        *self
+    }
+}
+
 impl AstNodeIndex {
     pub fn increment(&mut self) -> AstNodeIndex {
         let result = AstNodeIndex(self.0);
