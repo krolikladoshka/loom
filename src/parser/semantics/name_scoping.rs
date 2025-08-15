@@ -137,6 +137,23 @@ impl Scope {
             None
         }
     }
+
+    pub fn find_impl_block_for_structure(&self, structure_node_id: AstNodeIndex) -> Option<&ImplBlock> {
+        self.impl_blocks
+            .iter()
+            .find(|(_, v)|
+                v.struct_ast_node_index == structure_node_id
+            ).map(|(_, v)| v)
+    }
+
+    pub fn find_impl_block_for_structure_mut(&mut self, structure_node_id: AstNodeIndex) -> Option<&mut ImplBlock> {
+        self.impl_blocks
+            .iter_mut()
+            .find(|(_, v)|
+                v.struct_ast_node_index == structure_node_id
+            )
+            .map(|(_, v)| v)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -358,7 +375,7 @@ impl ScopeTree {
             .filter(|scope| !scope.impl_blocks.is_empty())
             .any(|scope| scope.find_in_impl_block(name, struct_name).is_some())
     }
-    
+
     pub fn stack_scope(&mut self, parent: Option<usize>) -> (usize, &mut Scope) {
         self.scopes.push(Scope::new(parent));
         self.tree.push(parent.unwrap_or(0));
@@ -367,6 +384,23 @@ impl ScopeTree {
         (idx, &mut self.scopes[idx])
     }
 
+    pub fn get_impl_block(&self, scope_index: usize, impl_block_id: &AstNodeIndex) -> Option<&ImplBlock> {
+        if let Some(impl_block) = self.scopes[scope_index].impl_blocks
+            .iter()
+            .find(|(_, v)| v.ast_node_index == *impl_block_id)
+            .map(|(_, v)| v)
+        {
+            return Some(impl_block);
+        };
+
+        if scope_index == 0 {
+            return None;
+        }
+
+        let parent_scope = self.tree[scope_index];
+
+        self.get_impl_block(parent_scope, impl_block_id)
+    }
     #[inline(always)]
     pub fn scope_contains(&self, scope_index: usize, name: &str) ->  bool {
         let Some(scope) = self.scopes.get(scope_index) else {
@@ -497,6 +531,20 @@ impl Default for NameScopingContext {
 }
 
 impl NameScopingContext {
+    pub fn find_struct_node_id_from_scope<T: AstNode>(
+        &self, node: &T, name: &String
+    ) -> AstNodeIndex{
+        let scope_index = self
+            .local_scopes
+            .get_reverse_scope_index(&node.get_node_id()).unwrap();
+        let (_, scope) = self.local_scopes.find_from_scope(
+            *scope_index, name
+        ).unwrap();
+
+        *scope.find_struct_in_scope(
+            &name
+        ).unwrap()
+    }
     #[inline(always)]
     pub fn get_scope(&self, scope_index: usize) -> &Scope {
         self.local_scopes.scopes.get(scope_index).unwrap()
@@ -807,6 +855,10 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
 
         let prev_scope = context.name_scoping.current_scope;
         context.name_scoping.current_scope = bound_struct_impl_view.impl_block_scope_index;
+        context.name_scoping.local_scopes.set_reverse_index(
+            fn_statement,
+            bound_struct_impl_view.impl_block_scope_index.clone()
+        );
         
         context.with_new_naming_scope(
             |context| {
@@ -836,7 +888,7 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
                 context.name_scoping.is_within_impl_block = prev_impl_block_flag;
             }
         );
-
+       
         context.name_scoping.current_scope = prev_scope;
     }
 

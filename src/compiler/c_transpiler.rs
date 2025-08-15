@@ -1,14 +1,107 @@
 use std::collections::HashMap;
+use std::fmt::{Debug, Pointer};
+use std::io::empty;
+use std::ops::Deref;
 use crate::parser::semantics::{TranspilerPassContext};
-use crate::parser::semantics::traits::Semantics;
-use crate::syntax::ast::{ArrowAccess, Assignment, Ast, AstNode, AstNodeIndex, Binary, BreakStatement, Call, Cast, ContinueStatement, DotAccess, Expression, ExpressionStatement, FnStatement, Grouping, Identifier, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, PointerAnnotation, ReturnStatement, SelfExpression, Statement, StructStatement, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
+use crate::parser::semantics::traits::{AstContext, Semantics};
+use crate::syntax::ast::{ArrowAccess, Assignment, Ast, AstNode, AstNodeIndex, Binary, BreakStatement, Call, Cast, ContinueStatement, DotAccess, Expression, ExpressionStatement, FnStatement, Function, Grouping, Identifier, IfElseStatement, ImplFunction, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, PointerAnnotation, ReturnStatement, SelfExpression, Statement, StructInitializer, StructStatement, TypeAnnotation, TypeKind, TypedDeclaration, Unary, WhileStatement};
+use crate::syntax::tokens::TokenType;
+use crate::typing::literal_typing::{BuiltinType, FunctionType, PointerType, StructType, Type};
+
+trait Transpiled<T: AstContext> {
+    fn transpiled(&self, _context: &T) -> String
+    where
+        Self: Debug
+    {
+        format!("/* {:?} */", self)
+    }
+}
+
+fn walk_pointer(pointer: &PointerType, result: &mut Vec<bool>) -> BuiltinType {
+    result.push(pointer.mutable);
+    match &pointer.inner_type {
+        BuiltinType::Pointer(inner_pointer) => {
+            walk_pointer(inner_pointer, result)
+        },
+        other => other.clone()
+    }
+}
+impl Transpiled<TranspilerPassContext> for PointerType {
+    fn transpiled(&self, context: &TranspilerPassContext) -> String {
+        // *mut *const u32
+        // u32 const * <mut> * <-
+        let mut stack = Vec::new();
+        let innermost_type = walk_pointer(self, &mut stack);
+
+        let mut result = innermost_type.transpiled(context);
+
+        for pointer_modifier in stack.iter().rev() {
+            result.push_str(&format!(
+                "{}*",
+                if *pointer_modifier {
+                    ""
+                } else {
+                    " const "
+                }
+            ));
+        }
+
+        result
+    }
+}
+
+impl Transpiled<TranspilerPassContext> for FunctionType {}
+
+impl Transpiled<TranspilerPassContext> for BuiltinType {
+    fn transpiled(&self, context: &TranspilerPassContext) -> String
+    {
+        match &self {
+            BuiltinType::Void => "void".to_string(),
+            BuiltinType::Null => "const void* const".to_string(),
+            BuiltinType::Bool => "bool".to_string(),
+            BuiltinType::I8 => "i8".to_string(),
+            BuiltinType::I16 => "i16".to_string(),
+            BuiltinType::I32 => "i32".to_string(),
+            BuiltinType::I64 => "i64".to_string(),
+            BuiltinType::U8 => "u8".to_string(),
+            BuiltinType::U16 => "u16".to_string(),
+            BuiltinType::U32 => "u32".to_string(),
+            BuiltinType::U64 => "u64".to_string(),
+            BuiltinType::F32 => "f32".to_string(),
+            BuiltinType::F64 => "f64".to_string(),
+            BuiltinType::Usize => "usize".to_string(),
+            BuiltinType::Char => "char".to_string(),
+            BuiltinType::String => "char*".to_string(),
+            BuiltinType::Pointer(pointer) => pointer.transpiled(context),
+            BuiltinType::Function(function) => function.transpiled(context),
+            BuiltinType::Struct(struct_type) => struct_type.name.clone(),
+        }
+    }
+}
+
+impl Transpiled<TranspilerPassContext> for Type {
+    fn transpiled(&self, context: &TranspilerPassContext) -> String {
+        match &self.ttype {
+            BuiltinType::Pointer(pointer) => pointer.transpiled(context),
+            other => format!(
+                "{}{}",
+                // todo: for pointer const should be places after
+                if self.mutable { "" } else { "const " },
+                other.transpiled(context),
+            )
+        }
+
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CTranspilerContext {
     transpiled_stack: Vec<String>,
     transpile_stack_index: Vec<usize>,
     pub transpile_results: HashMap<AstNodeIndex, String>,
-    pub result: String
+    pub header_result: String,
+    pub result: String,
+    level: usize,
 }
 
 impl Default for CTranspilerContext {
@@ -17,6 +110,126 @@ impl Default for CTranspilerContext {
     }
 }
 
+#[derive(Default)]
+struct TranspileHelper {
+    indent_size: usize,
+    level: usize,
+    result: String,
+}
+
+impl TranspileHelper {
+    pub fn from_context(context: &TranspilerPassContext) -> Self {
+        Self {
+            indent_size: 4,
+            level: context.transpile.level,
+            result: String::new(),
+        }
+    }
+
+    pub fn block<T>(&mut self, block: T)
+    where
+        T: FnOnce(&mut Self)
+    {
+        self.level += 1;
+        block(self);
+        self.level -= 1
+    }
+    pub fn pad_value(&self) -> String {
+        " ".repeat(self.level * self.indent_size)
+    }
+
+    pub fn indent_value(&self) -> String {
+        " ".repeat((self.level + 1) * self.indent_size)
+    }
+
+    pub fn push(&mut self, value: &str) {
+        self.result.push_str(
+            value
+        );
+    }
+
+    pub fn ln(&mut self) {
+        self.result.push('\n');
+    }
+
+    pub fn pad(&mut self) {
+        self.result.push_str(&self.pad_value());
+    }
+
+    pub fn space(&mut self) {
+        self.result.push(' ');
+    }
+
+    pub fn indent(&mut self) {
+        self.result.push_str(&self.indent_value());
+    }
+
+    pub fn wrap(&mut self) {
+        self.result.push('\n');
+        self.pad();
+    }
+
+    pub fn wrap_indent(&mut self) {
+        self.result.push('\n');
+        self.indent();
+    }
+    pub fn push_and_wrap(&mut self, value: &str) {
+        self.push(value);
+        self.wrap();
+    }
+
+    pub fn push_and_wrap_indent(&mut self, value: &str) {
+        self.push(value);
+        self.wrap_indent();
+    }
+
+    pub fn push_and_indent(&mut self, value: &str) {
+        self.push(value);
+        self.indent();
+    }
+
+    pub fn push_all_wrapped(&mut self, values: &[&str]) {
+        values.iter().for_each(|value| {
+            self.push(*value);
+            self.wrap();
+        });
+    }
+
+    pub fn push_all_padded<T: AsRef<str>>(&mut self, values: &[T], separator: &str) {
+        if values.is_empty() {
+            return;
+        }
+
+        self.pad();
+        for i in 0..values.len() - 1 {
+            self.push(values[i].as_ref());
+            self.push(separator);
+            self.wrap();
+
+        }
+        self.push(values.last().unwrap().as_ref());
+    }
+
+    pub fn push_all_indented<T: AsRef<str>>(&mut self, values: &[T], separator: &str) {
+        if values.is_empty() {
+            return;
+        }
+
+        self.indent();
+        for i in 0..values.len() - 1 {
+            self.push(values[i].as_ref());
+            self.push(separator);
+            self.wrap_indent()
+        }
+        self.push(values.last().unwrap().as_ref());
+    }
+}
+
+impl Into<String> for TranspileHelper {
+    fn into(self) -> String {
+        self.result
+    }
+}
 
 impl CTranspilerContext {
     pub fn new() -> Self {
@@ -24,7 +237,9 @@ impl CTranspilerContext {
             transpiled_stack: vec![],
             transpile_stack_index: vec![],
             transpile_results: HashMap::new(),
+            header_result: String::new(),
             result: Self::generate_main_c_file(),
+            level: 0,
         }
     }
 
@@ -48,8 +263,33 @@ impl CTranspilerContext {
     }
 }
 
-#[derive(Default)]
-pub struct CTranspilerSemantics;
+impl TranspilerPassContext {
+    fn transpile_block<T>(&mut self, block: T)
+    where
+        T: FnOnce(&mut Self)
+    {
+        self.transpile.level += 1;
+
+        block(self);
+
+        self.transpile.level -= 1;
+    }
+}
+
+// #[derive(Default)]
+pub struct CTranspilerSemantics {
+    indent: usize,
+    wrap: bool,
+}
+
+impl Default for CTranspilerSemantics {
+    fn default() -> Self {
+        Self {
+            indent: 0,
+            wrap: false,
+        }
+    }
+}
 
 ///// TODO!: I honestly can't understand whether the code is now shittier or more flexible
 impl CTranspilerSemantics {
@@ -86,7 +326,7 @@ impl CTranspilerSemantics {
         //
         // result
         statements.iter()
-            .map(|s| self.get_transpiled_statement(s, context).clone())
+            .map(|s| self.get_transpiled_node(s, context).clone())
             .collect::<Vec<String>>()
     }
 
@@ -98,7 +338,7 @@ impl CTranspilerSemantics {
         self.visit_all_expressions(expressions, context);
 
         expressions.iter()
-            .map(|e| self.get_transpiled_expr(e, context).clone())
+            .map(|e| self.get_transpiled_node(e, context).clone())
             .collect::<Vec<String>>()
     }
 
@@ -108,7 +348,7 @@ impl CTranspilerSemantics {
     ) -> Vec<String>
     {
         statements.iter()
-            .map(|s| self.get_transpiled_statement(s, context).clone())
+            .map(|s| self.get_transpiled_node(s, context).clone())
             .collect::<Vec<String>>()
     }
 
@@ -118,7 +358,7 @@ impl CTranspilerSemantics {
     ) -> Vec<String>
     {
         exprs.iter()
-            .map(|s| self.get_transpiled_expr(s, context).clone())
+            .map(|s| self.get_transpiled_node(s, context).clone())
             .collect::<Vec<String>>()
     }
 
@@ -130,15 +370,8 @@ impl CTranspilerSemantics {
     }
     
     #[inline(always)]
-    fn get_transpiled<'a>(
-        &self, ast: &Ast, context: &'a mut TranspilerPassContext
-    ) -> &'a String {
-        context.transpile.get_transpile_result(&ast.get_node_id()).unwrap()
-    }
-
-    #[inline(always)]
-    fn get_transpiled_statement<'a>(
-        &self, stmt: &Statement, context: &'a mut TranspilerPassContext
+    fn get_transpiled_node<'a, T: AstNode>(
+        &self, stmt: &T, context: &'a mut TranspilerPassContext
     ) -> &'a String {
         context.transpile.get_transpile_result(&stmt.get_node_id()).unwrap()
     }
@@ -148,13 +381,6 @@ impl CTranspilerSemantics {
         &self, stmt: &Statement, context: &'a mut TranspilerPassContext
     ) -> Option<&'a String> {
         context.transpile.get_transpile_result(&stmt.get_node_id())
-    }
-
-    #[inline(always)]
-    fn get_transpiled_expr<'a>(
-        &self, expr: &Expression, context: &'a mut TranspilerPassContext
-    ) -> &'a String {
-        context.transpile.get_transpile_result(&expr.get_node_id()).unwrap()
     }
 
     #[inline(always)]
@@ -294,10 +520,45 @@ impl CTranspilerSemantics {
             }
         }
     }
+
+    #[inline(always)]
+    fn blank(&self) -> String {
+        " ".repeat(self.indent)
+    }
+}
+
+
+
+
+fn empty_builder() -> TranspileHelper {
+    TranspileHelper::default()
+}
+
+fn builder(context: &TranspilerPassContext) -> TranspileHelper {
+    TranspileHelper::from_context(context)
+}
+
+fn builder_with(init: String, context: &TranspilerPassContext) -> TranspileHelper {
+    let mut builder = TranspileHelper::from_context(context);
+    builder.push(&init);
+
+    builder
+}
+
+impl TranspilerPassContext {
+    fn find_struct_type_from_name<T: AstNode>(
+        &self, node: &T, name: &String
+    ) -> &StructType {
+        let struct_node_id = self.name_scoping.find_struct_node_id_from_scope(
+            node, name
+        );
+
+        self.type_validation.get_struct_type(&struct_node_id)
+    }
 }
 
 impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
-    fn visit_statement(&self, statement: &Statement, context: &mut TranspilerPassContext) {
+    fn visit_statement_default(&self, statement: &Statement, context: &mut TranspilerPassContext) {
         use Statement::*;
 
         match statement {
@@ -331,11 +592,11 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     fn visit_next(&self, statement: &Statement, context: &mut TranspilerPassContext) {
         self.visit_statement(statement, context);
 
-        let transpiled = self.get_transpiled_statement(statement, context).clone();
+        let transpiled = self.get_transpiled_node(statement, context).clone();
         context.transpile.result.push_str(
             transpiled.as_str()
         );
-        context.transpile.result.push_str("\n\n");
+        context.transpile.result.push_str("\n");
     }
 
     fn visit_let_statement(
@@ -343,33 +604,29 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     )
     {
         self.visit_let_statement_default(let_statement, context);
-        
-        let mut result = String::default();
 
-        if let Some(t) = &let_statement.variable_type {
-            let annotation = self.transpile_type_annotation(&t);
-            result.push_str(annotation.as_str());
-        } else {
-            result.push_str("void*");
-        }
+        let mut result = builder(context);
+        result.pad();
+        let variable_type = context.type_validation.get_node_type(let_statement);
+        result.push(&variable_type.transpiled(context));
+        result.space();
+        result.push(&let_statement.name.lexeme);
 
-        result.push(' ');
-        result.push_str(let_statement.name.lexeme.as_str());
-        
-        
         if let Some(initializer) = &let_statement.initializer {
-            result.push_str(" = ");
+            result.push(" = ");
+            let transpiled_initializer = self.get_transpiled_node(
+                initializer.as_ref(),
+                context
+            );
 
-            let expression = self.get_transpiled_expr(initializer, context).clone();
-
-            result.push_str(expression.as_str());
+            result.push(transpiled_initializer);
         }
 
-        result.push(';');
+        result.push(";");
 
         context.transpile.set_transpile_result(
             let_statement.node_id,
-            result
+            result.into()
         );
     }
 
@@ -380,8 +637,8 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     {
         self.visit_expression_statement_default(statement, context);
         
-        let mut transpiled = self.get_transpiled_expr(
-            &statement.expression, context
+        let mut transpiled = self.get_transpiled_node(
+            statement.expression.as_ref(), context
         ).clone();
 
         transpiled.push(';');
@@ -393,25 +650,30 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     }
 
     fn visit_while_statement(&self, while_statement: &WhileStatement, context: &mut TranspilerPassContext) {
-        self.visit_while_statement_default(while_statement, context);
-        
-        let mut result = String::from("while (");
-        let condition = self.get_transpiled_expr(
-            &while_statement.condition, context
-        );
-        result.push_str(condition);
-        result.push_str(") {\n\t");
-        
-        let body = self.get_all_transpiled_statements(
-            &while_statement.body, context
-        ).join("\n\t");
+        let mut result = builder(context);
+        result.pad();
+        result.push("while (");
 
-        result.push_str(body.as_str());
-        result.push_str("\n\t}\n");
+        self.visit_while_statement_default(while_statement, context);
+
+        self.visit_expression(&while_statement.condition, context);
+        let condition_transpiled = self.get_transpiled_node(
+            while_statement.condition.as_ref(), context
+        );
+        result.push(&condition_transpiled);
+        result.push(") {");
+        result.wrap_indent();
+
+        result.block(|result| {
+            let transpiled_body = self.transpile_all(&while_statement.body, context);
+            result.push_all_padded(&transpiled_body, "");
+            result.wrap();
+        });
+        result.push("}");
 
         context.transpile.set_transpile_result(
             while_statement.node_id,
-            result
+            result.into()
         )
     }
     
@@ -436,22 +698,187 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
             "continue;".to_string()
         )
     }
-    fn visit_fn_statement(
+
+    fn visit_function_statement(
         &self,
-        statement: &FnStatement,
+        fn_statement: &FnStatement,
+        function: &Function,
         context: &mut TranspilerPassContext
-    )
-    {
-        // let mut result = String::new();
-        let result = self.transpile_function(
-            &statement.function, String::new(), context
-        );
+    ) {
+
+        fn transpile_function_header(
+            fn_statement: &FnStatement, function: &Function, context: &mut TranspilerPassContext
+        ) -> String {
+            let mut result = builder(context);
+            result.pad();
+
+            let function_type = context.type_validation.get_function_type(
+                fn_statement
+            ).unwrap();
+
+            result.push(&function_type.return_type.transpiled(context));
+            result.space();
+            result.push(&function.name.lexeme);
+
+
+            if function_type.arguments.len() > 0 {
+                result.push("(\n");
+                let function_arguments_length = function.arguments.len();
+
+                let name_to_type: Vec<_> = function.arguments.iter()
+                    .cloned()
+                    .zip(function_type.arguments.iter().cloned())
+                    .collect();
+
+                // context.transpile_block(|ctx| {
+                result.block(|result| {
+                    let mut parameters = Vec::with_capacity(
+                        function_arguments_length
+                    );
+                    for (parameter, parameter_type) in name_to_type {
+                        let mut transpiled_parameter = parameter_type.transpiled(context);
+                        transpiled_parameter.push_str(" ");
+                        transpiled_parameter.push_str(&parameter.name.lexeme);
+
+                        parameters.push(transpiled_parameter);
+                    }
+
+                    result.push_all_padded(&parameters, ",");
+                });
+                result.wrap();
+                result.push(")");
+            } else {
+                result.push("()");
+            }
+
+            result.into()
+        }
+
+
+        let result = transpile_function_header(fn_statement, function, context);
+        let mut result = builder_with(result, context);
+
+        if function.body.len() > 0 {
+            // context.transpile_block(|context| {
+            result.space();
+            result.push("{\n");
+
+            let transpiled_body = self.transpile_all(&function.body, context);
+
+            result.push_all_indented(&transpiled_body, "");
+            result.wrap();
+            result.push("}");
+            // });
+        } else {
+            result.push("{}\n")
+        }
 
         context.transpile.set_transpile_result(
-            statement.node_id,
-            result
-        )
+            fn_statement.node_id,
+            result.into()
+        );
     }
+
+    fn visit_method_statement(
+        &self,
+        fn_statement: &FnStatement,
+        method: &Method,
+        context: &mut TranspilerPassContext
+    ) {
+
+        fn transpile_function_header(
+            fn_statement: &FnStatement, method: &Method, context: &mut TranspilerPassContext
+        ) -> String {
+            let mut result = builder(context);
+            result.pad();
+
+            let function_type = context.type_validation.get_function_type(
+                fn_statement
+            ).unwrap();
+
+            result.push(&function_type.return_type.transpiled(context));
+            result.space();
+            result.push(&method.name.lexeme);
+
+            let bound_type = &function_type.arguments[0];
+            let self_parameter = format!("{} self", bound_type.transpiled(context));
+
+            if function_type.arguments.len() > 0 {
+                result.push("(\n");
+                let function_arguments_length = method.arguments.len();
+
+                let name_to_type: Vec<_> = method.arguments.iter()
+                    .cloned()
+                    .zip(function_type.arguments.iter().cloned())
+                    .collect();
+
+                // context.transpile_block(|ctx| {
+                result.block(|result| {
+                    let mut parameters = Vec::with_capacity(
+                        function_arguments_length
+                    );
+
+                    parameters.push(self_parameter);
+
+                    for (parameter, parameter_type) in name_to_type {
+                        let mut transpiled_parameter = parameter_type.transpiled(context);
+                        transpiled_parameter.push_str(" ");
+                        transpiled_parameter.push_str(&parameter.name.lexeme);
+
+                        parameters.push(transpiled_parameter);
+                    }
+
+                    result.push_all_padded(&parameters, ",");
+                });
+                result.wrap();
+                result.push(")");
+            } else {
+                result.push(&format!("({})", self_parameter));
+            }
+
+            result.into()
+        }
+
+
+        let result = transpile_function_header(fn_statement, method, context);
+        let mut result = builder_with(result, context);
+
+        if method.body.len() > 0 {
+            // context.transpile_block(|context| {
+            result.space();
+            result.push("{\n");
+
+            let transpiled_body = self.transpile_all(&method.body, context);
+
+            result.push_all_indented(&transpiled_body, "");
+            result.wrap();
+            result.push("}");
+            // });
+        } else {
+            result.push("{}\n")
+        }
+
+        context.transpile.set_transpile_result(
+            fn_statement.node_id,
+            result.into()
+        );
+    }
+    // fn visit_fn_statement(
+    //     &self,
+    //     statement: &FnStatement,
+    //     context: &mut TranspilerPassContext
+    // )
+    // {
+    //     // let mut result = String::new();
+    //     let result = self.transpile_function(
+    //         &statement.function, String::new(), context
+    //     );
+    //
+    //     context.transpile.set_transpile_result(
+    //         statement.node_id,
+    //         result
+    //     )
+    // }
 
     fn visit_return_statement(
         &self, return_statement: &ReturnStatement,
@@ -459,22 +886,24 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     )
     {
         self.visit_return_statement_default(return_statement, context);
-        
-        let mut result = String::from("return");
+        let mut result = builder(context);
+        // result.pad();
+        result.push("return");
 
         if let Some(return_expression) = &return_statement.expression {
-            let return_expr = self.get_transpiled_expr(
-                &return_expression, context
+            result.space();
+
+            let return_expr = self.get_transpiled_node(
+                return_expression.as_ref(), context
             );
 
-            result.push(' ');
-            result.push_str(return_expr.as_str());
+            result.push(return_expr);
         }
 
-        result.push(';');
+        result.push(";");
         context.transpile.set_transpile_result(
             return_statement.node_id,
-            result
+            result.into()
         );
     }
 
@@ -484,25 +913,59 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         context: &mut TranspilerPassContext
     )
     {
-        let mut result = format!(
-            "typedef struct {} {{\n\t",
-            struct_statement.name.literal
-        );
+        fn build_struct_header(
+            struct_statement: &StructStatement,
+            context: &TranspilerPassContext
+        ) -> String {
+            let mut result = empty_builder();
+            result.push(
+                &format!(
+                    "typedef struct {} {}",
+                    &struct_statement.name.literal,
+                    &struct_statement.name.literal
+                )
+            );
 
-        let fields = struct_statement.fields
-            .iter()
-            .map(|td| self.transpile_typed_declaration(td) + ";")
-            .collect::<Vec<String>>()
-            .join("\n\t");
-        
-        result.push_str(fields.as_str());
-        result.push_str(
-            format!("\n}} {};\n", struct_statement.name.literal).as_str()
-        );
+            result.into()
+        }
+        let struct_header = build_struct_header(struct_statement, context);
+        context.transpile.header_result.push_str(&struct_header);
+        context.transpile.header_result.push_str(";\n");
+
+        let mut result = builder(context);
+
+        result.pad();
+        result.push(&format!("struct {} {{", &struct_statement.name.literal));
+        // result.wrap_indent();
+        result.ln();
+        if struct_statement.fields.len() > 0 {
+            result.block(|result| {
+                let fields: Vec<_> = struct_statement.fields.iter()
+                    .map(|field_declaration| {
+                        let field_type = {
+                            let field_type = context.type_validation.get_node_type(
+                                &field_declaration.declared_type
+                            );
+                            field_type.ttype.transpiled(context)
+                            // field_type.transpiled(context)
+                        };
+
+                        format!(
+                            "{} {};",
+                            field_type, field_declaration.name.literal
+                        )
+                    })
+                    .collect();
+
+                result.push_all_padded(&fields, "\n");
+            });
+            result.wrap();
+        }
+        result.push("}\n");
 
         context.transpile.set_transpile_result(
             struct_statement.node_id,
-            result
+            result.into()
         );
     }
 
@@ -511,29 +974,54 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         context: &mut TranspilerPassContext
     )
     {
-        let impl_prefix = impl_statement.implemented_type.literal.clone();
-        let mut transpiled_declarations = vec![];
-        for top_level_statement in &impl_statement.top_level_statements {
-            self.visit_statement(top_level_statement, context);
-            let transpiled_declaration = self.get_transpiled_statement(
-                top_level_statement, context
-            );
+        let mut result = builder(context);
+        result.pad();
+        let define_block_name = format!(
+            "{}_IMPL_BLOCK",
+            impl_statement.implemented_type.literal.to_uppercase()
+        );
 
-            transpiled_declarations.push(transpiled_declaration.clone());
-        }
+        // result.push()
+        // result.push(&format!("#define {}", define_block_name));
 
-        for function in &impl_statement.functions {
-            let transpiled_function = self.transpile_function(
-                &function.function, impl_prefix.clone(), context
-            );
-            transpiled_declarations.push(transpiled_function);
-        }
 
-        let result = transpiled_declarations.join("\n\t");
+        result.block(|result| {
+            let impl_prefix = impl_statement.implemented_type.literal.clone();
+            // let mut transpiled_declarations = vec![];
+            let mut top_level_statements = self.transpile_all(&impl_statement.top_level_statements, context);
+
+
+            // for top_level_statement in &impl_statement.top_level_statements {
+            //     self.visit_statement(top_level_statement, context);
+            //     let transpiled_declaration = self.get_transpiled_statement(
+            //         top_level_statement, context
+            //     );
+            //
+            //     transpiled_declarations.push(transpiled_declaration.clone());
+            // }
+
+            for function in &impl_statement.functions {
+                self.visit_fn_statement(function, context);
+                let transpiled_function = self.get_transpiled_node(
+                    function, context
+                );
+                top_level_statements.push(transpiled_function.clone());
+            }
+            result.push_all_padded(&top_level_statements, "");
+        });
+
+        // for function in &impl_statement.functions {
+        //     let transpiled_function = self.transpile_function(
+        //         &function.function, impl_prefix.clone(), context
+        //     );
+        //     transpiled_declarations.push(transpiled_function);
+        // }
+        //
+        // let result = transpiled_declarations.join("\n\t");
 
         context.transpile.set_transpile_result(
             impl_statement.node_id,
-            result
+            result.into()
         );
     }
 
@@ -541,25 +1029,48 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         &self, if_else: &IfElseStatement, context: &mut TranspilerPassContext
     )
     {
-        self.visit_if_else_statement_default(if_else, context);
-        
-        let condition = self.get_transpiled_expr(&if_else.condition, context).clone();
-        let then_branch = self.get_all_transpiled_statements(&if_else.then_branch, context)
-            .join("\n\t");
-        
-        let mut result = format!("if ({}) {{\n\t{}\n\t}}", condition, then_branch);
+        let mut result = builder(context);
+        result.pad();
+        result.push("if (");
+
+        self.visit_expression(&if_else.condition, context);
+        let transpiled_condition = self.get_transpiled_node(
+            if_else.condition.as_ref(), context
+        );
+        result.push(transpiled_condition);
+        result.push(") {");
+
+        if if_else.then_branch.len() > 0 {
+            result.wrap_indent();
+            result.block(|result| {
+                let then_body = self.transpile_all(
+                    &if_else.then_branch, context
+                );
+                result.push_all_padded(&then_body, "\n");
+                result.wrap();
+            });
+        }
+        result.push("}");
         
         if let Some(else_branch) = &if_else.else_branch {
-            let else_branch = self.get_all_transpiled_statements(
-                else_branch, context
-            ).join("\n\t");
+            result.push(" else {");
 
-            result.push_str(format!(" else {{\n\t{}\n\t}}", else_branch).as_str());
+            if else_branch.len() > 0 {
+                result.wrap_indent();
+                result.block(|result| {
+                    let else_branch = self.transpile_all(
+                        else_branch, context
+                    );
+                    result.push_all_padded(&else_branch, "\n");
+                    result.wrap();
+                });
+            }
+            result.push("}\n");
         }
 
         context.transpile.set_transpile_result(
             if_else.node_id,
-            result,
+            result.into(),
         );
     }
 
@@ -568,7 +1079,11 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     )
     {
         use crate::syntax::ast::Expression::*;
-        let mut result = String::from("(");
+        let mut result = if self.wrap {
+            String::from("(")
+        } else {
+            String::from("")
+        };
 
         match expression {
             Assignment(assignment) => {
@@ -596,6 +1111,8 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
                 self.visit_self(expression, context),
             Grouping(grouping) =>
                 self.visit_grouping(grouping, context),
+            StructInitializer(initializer) =>
+                self.visit_struct_initializer(initializer, context),
             _ => {
                 context.transpile.set_transpile_result(
                     expression.get_node_id(),
@@ -604,9 +1121,12 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
             }
         };
 
-        let expr = self.get_transpiled_expr(expression, context);
+        let expr = self.get_transpiled_node(expression, context);
         result.push_str(expr);
-        result.push(')');
+
+        if self.wrap {
+            result.push(')');
+        }
 
         context.transpile.set_transpile_result(expression.get_node_id(), result);
     }
@@ -618,8 +1138,8 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     {
         self.visit_grouping_default(grouping, context);
 
-        let result = self.get_transpiled_expr(
-            &grouping.expression, context
+        let result = self.get_transpiled_node(
+            grouping.expression.as_ref(), context
         ).clone();
 
         context.transpile.set_transpile_result(
@@ -703,8 +1223,8 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         self.visit_dot_access_default(dot_access, context);
 
         let mut result = String::with_capacity(3 + dot_access.name.lexeme.len());
-        let pointer = self.get_transpiled_expr(
-            &dot_access.object, context
+        let pointer = self.get_transpiled_node(
+            dot_access.object.as_ref(), context
         );
         result.push_str(pointer.as_str());
         result.push_str(".");
@@ -722,8 +1242,8 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         self.visit_arrow_access_default(arrow_access, context);
 
         let mut result = String::with_capacity(4 + arrow_access.name.lexeme.len());
-        let pointer = self.get_transpiled_expr(
-            &arrow_access.pointer, context
+        let pointer = self.get_transpiled_node(
+            arrow_access.pointer.as_ref(), context
         );
         result.push_str(pointer.as_str());
         result.push_str("->");
@@ -740,7 +1260,7 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         
         let mut result = String::with_capacity(4);
 
-        let callee = self.get_transpiled_expr(call.callee.as_ref(), context);
+        let callee = self.get_transpiled_node(call.callee.as_ref(), context);
         result.push_str(callee);
         result.push('(');
         
@@ -755,11 +1275,21 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     }
 
     fn visit_unary(&self, unary: &Unary, context: &mut TranspilerPassContext) {
-        let mut result = String::from(unary.operator.lexeme.as_str());
+        let mut result = match unary.operator.token_type{
+            TokenType::Plus => String::from("+"),
+            TokenType::Minus => String::from("-"),
+            TokenType::Star => String::from("*"),
+            TokenType::BinaryAnd | TokenType::MutRef => String::from("&"),
+            TokenType::LogicalNot => String::from("!"),
+            TokenType::BinaryInvert => String::from("~"),
+            TokenType::Increment => String::from("++"),
+            TokenType::Decrement => String::from("--"),
+            _ => panic!("unknown unary operator {}", unary.operator),
+        };
 
         self.visit_unary_default(unary, context);
 
-        let expr = self.get_transpiled_expr(&unary.expression, context);
+        let expr = self.get_transpiled_node(unary.expression.as_ref(), context);
 
         result.push_str(expr.as_str());
 
@@ -774,7 +1304,7 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
 
         let type_annotation = self.transpile_type_annotation(&cast.target_type);
 
-        let cast_transpiled = self.get_transpiled_expr(&cast.left, context);
+        let cast_transpiled = self.get_transpiled_node(cast.left.as_ref(), context);
         let result = format!("({})({})", type_annotation, cast_transpiled);
 
         context.transpile.set_transpile_result(
@@ -786,12 +1316,12 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     fn visit_binary(&self, binary: &Binary, context: &mut TranspilerPassContext) {
         self.visit_binary_default(binary, context);
 
-        let mut left = self.get_transpiled_expr(&binary.left, context).clone();
+        let mut left = self.get_transpiled_node(binary.left.as_ref(), context).clone();
         left.push(' ');
         left.push_str(&binary.operator.lexeme.to_string());
         left.push(' ');
 
-        let right = self.get_transpiled_expr(&binary.right, context);
+        let right = self.get_transpiled_node(binary.right.as_ref(), context);
         left.push_str(right);
 
         context.transpile.set_transpile_result(
@@ -806,11 +1336,11 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     {
         self.visit_inplace_assignment_default(inplace_assignment, context);
 
-        let lhs = self.get_transpiled_expr(
-            &inplace_assignment.lhs, context
+        let lhs = self.get_transpiled_node(
+            inplace_assignment.lhs.as_ref(), context
         ).clone();
-        let rhs = self.get_transpiled_expr(
-            &inplace_assignment.rhs, context
+        let rhs = self.get_transpiled_node(
+            inplace_assignment.rhs.as_ref(), context
         );
 
         let mut result = String::new();
@@ -830,10 +1360,10 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     {
         self.visit_assignment_default(assignment, context);
 
-        let mut lhs = self.get_transpiled_expr(&assignment.lhs, context).clone();
+        let mut lhs = self.get_transpiled_node(assignment.lhs.as_ref(), context).clone();
         lhs.push_str(" = ");
 
-        let rhs = self.get_transpiled_expr(&assignment.rhs, context);
+        let rhs = self.get_transpiled_node(assignment.rhs.as_ref(), context);
         lhs.push_str(rhs.as_str());
 
         context.transpile.set_transpile_result(assignment.node_id, lhs);
@@ -848,6 +1378,48 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
             self_expression.node_id,
             "self".to_string()
         )
+    }
+
+    fn visit_struct_initializer(
+        &self,
+        struct_initializer: &StructInitializer,
+        context: &mut TranspilerPassContext
+    ) {
+        self.visit_struct_initializer_default(struct_initializer, context);
+
+        let mut result = builder(context);
+        result.push(&struct_initializer.struct_name.literal.clone());
+
+        result.push(" {");
+
+        if struct_initializer.field_initializers.len() > 0 {
+            result.block(|result| {
+                result.wrap();
+                let mut transpiled_fields = Vec::with_capacity(
+                    struct_initializer.field_initializers.len()
+                );
+
+                for (field_name, field_initializer) in struct_initializer.field_initializers.iter() {
+                    let transpiled_initializer = self.get_transpiled_node(field_initializer, context);
+                    transpiled_fields.push(
+                        format!(
+                            ".{} = {}",
+                            field_name.literal,
+                            transpiled_initializer
+                        )
+                    );
+                }
+
+                result.push_all_padded(&transpiled_fields, ",");
+                result.wrap();
+            });
+        }
+        result.push("}");
+
+        context.transpile.set_transpile_result(
+            struct_initializer.node_id,
+            result.into()
+        );
     }
 }
 

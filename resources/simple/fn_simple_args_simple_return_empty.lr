@@ -1,4 +1,5 @@
 fn test(a_i32: i32, b_i64: i64) -> i32 {
+    return 0i32;
 }
 
 struct TestA {}
@@ -17,5 +18,5 @@ fn test2(
     ->
         TestA 
 {
-
+    return TestA {};
 }

@@ -1,8 +1,9 @@
 use crate::parser::semantics::traits::Semantics;
 use crate::parser::semantics::FirstSemanticsPassContext;
-use crate::syntax::ast::{AstNodeIndex, BreakStatement, ContinueStatement, DeferStatement, FnStatement, Function, ImplFunction, ImplStatement, Method, ReturnStatement, SelfExpression, Statement, WhileStatement};
+use crate::syntax::ast::{AstNode, AstNodeIndex, BreakStatement, ConstStatement, ContinueStatement, DeferStatement, FnStatement, Function, ImplFunction, ImplStatement, Method, ReturnStatement, SelfExpression, Statement, StaticStatement, WhileStatement};
 use crate::syntax::lexer::Token;
 use std::collections::{HashMap, LinkedList};
+use std::hash::Hash;
 
 #[derive(Default, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 pub enum BlockType {
@@ -35,7 +36,11 @@ pub struct FlowControlContext {
     function_scope_block_type: BlockType,
 
     closest_function_ast_node_id: Option<AstNodeIndex>,
+    closest_impl_block_id: Option<AstNodeIndex>,
+    pub self_to_impl_block: HashMap<AstNodeIndex, AstNodeIndex>,
     pub function_deferred_calls: HashMap<AstNodeIndex, LinkedList<AstNodeIndex>>,
+    pub function_return_statements: HashMap<AstNodeIndex, Vec<AstNodeIndex>>,
+    pub node_to_impl_block: HashMap<AstNodeIndex, AstNodeIndex>,
 }
 
 impl FlowControlContext {
@@ -114,9 +119,80 @@ impl FlowControlSemantics {
             .or_default()
             .push_front(defer_statement.node_id);
     }
+
+    fn pin_self_to_impl_block(
+        &self,
+        self_expression: &SelfExpression,
+        context: &mut FirstSemanticsPassContext,
+    )
+    {
+        let Some(impl_block_id) = context.flow_control.closest_impl_block_id else {
+            panic!(
+                "{} tried to attach self expression outside of impl block: self_expression statement {}",
+                self_expression.token, self_expression.node_id
+            );
+        };
+
+        context.flow_control.self_to_impl_block
+            .insert(self_expression.node_id, impl_block_id);
+        self.pin_to_impl_block(self_expression, context);
+    }
+
+    fn pin_to_impl_block<T: AstNode>(&self, node: &T, context: &mut FirstSemanticsPassContext) {
+        let Some(impl_block_id) = context.flow_control.closest_impl_block_id else {
+            panic!(
+                "{} tried to attach node to an impl block outside of an impl block",
+                node.get_node_id()
+            );
+        };
+
+        if context.flow_control.self_to_impl_block.contains_key(&impl_block_id) {
+            panic!(
+                "{} node already attached to an impl block {}",
+                node.get_node_id(), impl_block_id
+            );
+        }
+        context.flow_control.node_to_impl_block
+            .insert(node.get_node_id(), impl_block_id);
+    }
+    
+    fn try_pin_to_impl_block<T: AstNode>(
+        &self, node: &T, context: &mut FirstSemanticsPassContext
+    ) {
+        let Some(impl_block_id) = context.flow_control.closest_impl_block_id else {
+            return;
+        };
+
+        if context.flow_control.self_to_impl_block.contains_key(&impl_block_id) {
+            panic!(
+                "{} node already attached to an impl block {}",
+                node.get_node_id(), impl_block_id
+            );
+        }
+        context.flow_control.node_to_impl_block
+            .insert(node.get_node_id(), impl_block_id);
+    }
 }
 
 impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
+    fn visit_static_statement(
+        &self,
+        static_statement: &StaticStatement,
+        context: &mut FirstSemanticsPassContext
+    ) {
+        self.visit_static_statement_default(static_statement, context);
+        self.try_pin_to_impl_block(static_statement, context);
+    }
+
+    fn visit_const_statement(
+        &self,
+        const_statement: &ConstStatement, 
+        context: &mut FirstSemanticsPassContext
+    ) {
+        self.visit_const_statement_default(const_statement, context);
+        self.try_pin_to_impl_block(const_statement, context);
+    }
+
     fn visit_while_statement(
         &self,
         while_statement: &WhileStatement,
@@ -136,14 +212,14 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
     {
         self.check_if_within_loops(context, &break_statement.token);
     }
-    
+
     fn visit_continue_statement(
         &self, continue_statement: &ContinueStatement, context: &mut FirstSemanticsPassContext
     )
     {
         self.check_if_within_loops(context, &continue_statement.token);
     }
-
+    
     fn visit_function_statement(
         &self,
         fn_statement: &FnStatement,
@@ -195,6 +271,7 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         let previous_function = context.flow_control.closest_function_ast_node_id;
         context.flow_control.closest_function_ast_node_id = Some(fn_statement.node_id);
         self.visit_fn_statement_default(fn_statement, context);
+        self.try_pin_to_impl_block(fn_statement, context);
         context.flow_control.closest_function_ast_node_id = previous_function;
     }
 
@@ -204,6 +281,12 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
     )
     {
         self.check_if_within_function(context, &return_statement.token);
+         
+        context.flow_control.function_return_statements
+            .entry(context.flow_control.closest_function_ast_node_id.unwrap())
+            .or_default()
+            .push(return_statement.node_id);
+        
         // TODO: mark a function ref in context
         // if return_statement.expression.is_none() && true {
         //     panic!("return statement without expression in non-unit function")
@@ -225,6 +308,10 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
     {
         let temp = context.flow_control.impl_and_top_level_block_type;
         context.flow_control.impl_and_top_level_block_type = BlockType::Impl;
+
+        let prev_block_id = context.flow_control.closest_impl_block_id;
+        context.flow_control.closest_impl_block_id = Some(impl_statement.node_id);
+
         context.scope_block_type(
             BlockType::Impl,
             |ctx| {
@@ -245,6 +332,7 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
                 }
             }
         );
+        context.flow_control.closest_impl_block_id = prev_block_id;
         context.flow_control.impl_and_top_level_block_type = temp;
     }
 
@@ -258,5 +346,6 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
         if context.flow_control.function_scope_block_type != BlockType::Method {
             panic!("{} outside of method", self_expression.token);
         }
+        self.pin_self_to_impl_block(self_expression, context);
     }
 }

@@ -1440,7 +1440,7 @@ impl Parser {
                 token.clone(),
                 self.token_as_literal(&token)?,
             ),
-            TokenType::I8Literal => Literal::new_u8(
+            TokenType::I8Literal => Literal::new_i8(
                 token.clone(),
                 self.token_as_literal(&token)?
             ),

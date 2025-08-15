@@ -1,5 +1,5 @@
 use crate::parser::semantics::traits::{AstContext, Semantics};
-use crate::syntax::ast::{current_id, Ast, AstNode, AstNodeIndex, Context, Expression, ImplStatement, Statement, StructStatement, TypeAnnotation, TypedDeclaration};
+use crate::syntax::ast::{current_id, Ast, AstNode, AstNodeIndex, Context, Expression, ImplStatement, ReturnStatement, Statement, StructStatement, TypeAnnotation, TypedDeclaration};
 use std::cell::Cell;
 use std::collections::HashMap;
 
@@ -21,6 +21,16 @@ impl Default for ParserContext {
 impl AstContext for ParserContext {}
 
 impl ParserContext {
+    pub fn get_return_statement(&self, ast_node_index: AstNodeIndex) -> Option<&ReturnStatement> {
+        let node = self.ast_nodes.get(&ast_node_index)?;
+        
+        match node {
+            Ast::Statement(Statement::ReturnStatement(s)) =>
+                Some(s),
+            _ => None
+        }
+    }
+    
     pub fn get_struct(&self, ast_node_index: AstNodeIndex) -> Option<&StructStatement> {
         let node = self.ast_nodes.get(&ast_node_index)?;
 
@@ -30,7 +40,17 @@ impl ParserContext {
             _ => None
         }
     }
-}
+
+    pub fn get_impl_block(&self, ast_node_index: AstNodeIndex) -> Option<&ImplStatement> {
+        let node = self.ast_nodes.get(&ast_node_index)?;
+
+        match node {
+            Ast::Statement(Statement::ImplStatement(s)) =>
+                Some(s),
+            _ => None
+        }
+    }
+}   
 
 #[derive(Default)]
 pub struct FlattenTree;

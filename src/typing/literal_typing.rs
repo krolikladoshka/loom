@@ -271,6 +271,7 @@ pub struct Type {
     pub mutable: bool,
 }
 
+
 impl TypeSize for Type {
     fn size(&self) -> usize {
         self.ttype.size()
@@ -295,6 +296,13 @@ impl Display for Type {
 }
 
 impl Type {
+    pub fn void() -> Self {
+        Self {
+            ttype: Void,
+            mutable: false,
+        }
+    }
+    
     pub fn new(ttype: BuiltinType, mutable: bool) -> Self {
         Self {
             ttype,
@@ -501,7 +509,7 @@ pub fn match_pointer_binary_comparison(
         Pointer(p_rhs),
     ) = (&lhs.ttype, &rhs.ttype)
     {
-        if p_lhs == p_rhs {
+        if p_lhs.inner_type_eq(p_rhs) {
             Some(Type::new(Bool, false))
         } else {
             None
