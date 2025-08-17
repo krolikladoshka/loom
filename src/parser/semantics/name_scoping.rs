@@ -123,6 +123,24 @@ impl Scope {
         }
     }
 
+    pub fn find_in_impl_block_by_struct_id(
+        &self,
+        name: &str,
+        struct_id: &AstNodeIndex,
+    ) -> Option<&ImplBlock> {
+        // TODO: will reorganize access everywhere by id . . .
+        let impl_block = self.impl_blocks
+            .iter()
+            .find(|(_, v)| v.struct_ast_node_index == *struct_id)
+            .map(|(_, block)| block)?;
+
+        if impl_block.contains_name(name) {
+            Some(impl_block)
+        } else {
+            None
+        }
+    }
+
     pub fn find_in_impl_block_mut(
         &mut self,
         name: &str,
@@ -365,7 +383,7 @@ impl ScopeTree {
         Ok(())
     }
 
-    pub fn find_in_all_impl_blocks(
+    pub fn check_exists_in_all_impl_blocks(
         &self,
         name: &str,
         struct_name: &str,
@@ -376,6 +394,27 @@ impl ScopeTree {
             .any(|scope| scope.find_in_impl_block(name, struct_name).is_some())
     }
 
+    pub fn find_in_impl_blocks(
+        &self,
+        start_scope: usize,
+        name: &str,
+        struct_id: AstNodeIndex
+    ) -> Option<&ImplBlock> {
+        let scope = &self.scopes[start_scope];
+        
+        if let Some(impl_block) = scope.find_in_impl_block_by_struct_id(name, &struct_id) {
+            Some(impl_block)
+        } else {
+            if start_scope == 0 {
+                return None;
+            }
+            
+            let parent = self.tree[start_scope];
+            
+            self.find_in_impl_blocks(parent, name, struct_id)
+        }
+    }
+    
     pub fn stack_scope(&mut self, parent: Option<usize>) -> (usize, &mut Scope) {
         self.scopes.push(Scope::new(parent));
         self.tree.push(parent.unwrap_or(0));
@@ -745,7 +784,7 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
                 };
             }
 
-            if context.name_scoping.local_scopes.find_in_all_impl_blocks(
+            if context.name_scoping.local_scopes.check_exists_in_all_impl_blocks(
                 &function.name.lexeme,
                 &bound_struct_impl_view.struct_name
             ) {
@@ -829,7 +868,7 @@ impl Semantics<FirstSemanticsPassContext> for NameScopingSemantics {
                 );
             };
         }
-        if context.name_scoping.local_scopes.find_in_all_impl_blocks(
+        if context.name_scoping.local_scopes.check_exists_in_all_impl_blocks(
             &method.name.lexeme,
             &bound_struct_impl_view.struct_name
         ) {

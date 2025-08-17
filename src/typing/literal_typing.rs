@@ -220,6 +220,13 @@ impl BuiltinType {
             _ => false,
         }
     }
+    
+    pub fn is_bool(&self) -> bool {
+        match self {
+            Bool => true,
+            _ => false,
+        }
+    }
 
     pub fn is_numeric(&self) -> bool {
         self.is_integer() || self.is_float()
@@ -307,6 +314,15 @@ impl Type {
         Self {
             ttype,
             mutable,
+        }
+    }
+    
+    pub fn new_pointer(ttype: Type, points_to_mut: bool, mutable: bool) -> Self {
+        Self {
+            ttype: Pointer(Box::new(PointerType::new(
+                ttype.ttype, points_to_mut
+            ))),
+            mutable
         }
     }
 
@@ -628,6 +644,11 @@ pub fn match_unary_op(op: TokenType, rhs: &Type) -> Option<Type> {
             Pointer(Box::new(PointerType::new(rhs.ttype.clone(), true))),
             true,
         )),
+        TokenType::LogicalNot => if rhs.ttype.is_bool() {
+            Some(Type::new(Bool, rhs.mutable))
+        } else {
+            None
+        },
         _ => None
     }
 }

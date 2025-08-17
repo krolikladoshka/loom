@@ -258,8 +258,8 @@ impl CTranspilerContext {
     }
 
     #[inline(always)]
-    pub fn get_transpile_result(&self, idx: &AstNodeIndex) -> Option<&String> {
-        self.transpile_results.get(idx)
+    pub fn get_transpile_result<T: AstNode>(&self, node: &T) -> Option<&String> {
+        self.transpile_results.get(&node.get_node_id())
     }
 }
 
@@ -1245,6 +1245,7 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
         let pointer = self.get_transpiled_node(
             arrow_access.pointer.as_ref(), context
         );
+        
         result.push_str(pointer.as_str());
         result.push_str("->");
         result.push_str(arrow_access.name.lexeme.as_str());
@@ -1256,15 +1257,49 @@ impl Semantics<TranspilerPassContext> for CTranspilerSemantics {
     }
 
     fn visit_call(&self, call: &Call, context: &mut TranspilerPassContext) {
-        self.visit_call_default(call, context);
+        let mut args = vec![];
         
+        
+        let callee = match call.callee.as_ref() {
+            Expression::DotAccess(dot_access) => {
+                self.visit_expression(&dot_access.object, context);
+
+                args.push(
+                    format!(
+                        "&{}",
+                        self.get_transpiled_node(dot_access.object.as_ref(), context)
+                    )
+                );
+
+                dot_access.name.literal.clone()
+            },
+            Expression::ArrowAccess(arrow_access) => {
+                self.visit_expression(&arrow_access.pointer, context);
+
+                args.push(
+                    self.get_transpiled_node(
+                        arrow_access.pointer.as_ref(), context
+                    ).clone()
+                );
+
+                arrow_access.name.literal.clone()
+            },
+            _ => {
+                self.visit_call_default(call, context);
+
+                self.get_transpiled_node(call.callee.as_ref(), context).clone()
+            }
+        };
+        
+
         let mut result = String::with_capacity(4);
 
-        let callee = self.get_transpiled_node(call.callee.as_ref(), context);
-        result.push_str(callee);
+        result.push_str(&callee);
         result.push('(');
+
+        let passed_args = self.transpile_all_exprs(&call.arguments, context);
+        args.extend(passed_args);
         
-        let args = self.get_all_transpiled_exprs(&call.arguments, context);
         result.push_str(args.join(", ").as_str());
         result.push(')');
 

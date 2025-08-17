@@ -1,10 +1,9 @@
-use std::collections::HashMap;
-use std::thread::scope;
 use crate::dev_assert;
-use crate::parser::semantics::traits::{AstContext, Semantics};
+use crate::parser::semantics::traits::{AstContext, ContextMapper, Semantics};
 use crate::parser::semantics::SecondSemanticsPassContext;
-use crate::syntax::ast::{ArrowAccess, Assignment, AstNode, AstNodeIndex, Binary, Call, Cast, DotAccess, Expression, FnStatement, Function, Grouping, Identifier, InplaceAssignment, LetStatement, LiteralNode, Method, SelfExpression, Statement, StructInitializer, StructStatement, TypeAnnotation, TypeKind, TypedDeclaration, Unary};
+use crate::syntax::ast::{ArrowAccess, Assignment, AstNode, AstNodeIndex, Binary, Call, Cast, DotAccess, Expression, FnStatement, Function, Grouping, Identifier, ImplStatement, InplaceAssignment, LetStatement, LiteralNode, Method, SelfExpression, Statement, StructInitializer, StructStatement, TypeAnnotation, TypeKind, TypedDeclaration, Unary};
 use crate::typing::literal_typing::{match_binary_op, match_inplace_assignment_op, match_unary_op, verify_cast_operator, BuiltinType, FunctionType, InnerTypeEq, PointerType, StructType, Type};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct TypeValidationContext {
@@ -36,6 +35,20 @@ impl AstContext for TypeValidationContext {}
 
 #[derive(Default)]
 pub struct TypeValidationSemantics;
+
+#[derive(Default)]
+pub struct TypeValidationSemanticsFirstPass;
+
+impl ContextMapper<SecondSemanticsPassContext> for SecondSemanticsPassContext {
+    fn map(from: SecondSemanticsPassContext) -> Self {
+        Self {
+            parser: from.parser,
+            flow_control: from.flow_control,
+            name_scoping: from.name_scoping,
+            type_validation: from.type_validation,
+        }
+    }
+}
 
 
 impl TypeValidationSemantics {
@@ -222,7 +235,280 @@ impl SecondSemanticsPassContext {
     }
 }
 
+
+impl Semantics<SecondSemanticsPassContext> for TypeValidationSemanticsFirstPass {
+    fn visit_statement(&self, statement: &Statement, context: &mut SecondSemanticsPassContext) {
+        match statement {
+            Statement::FnStatement(_) | Statement::StructStatement(_) |
+            Statement::ImplStatement(_) => self.visit_statement_default(
+                statement, context
+            ),
+            _ => {}
+        }
+    }
+
+    fn visit_function_statement(
+        &self,
+        fn_statement: &FnStatement,
+        function: &Function,
+        context: &mut SecondSemanticsPassContext
+    ) {
+        let function_return_type = {
+            if let Some(function_return_type) = &function.return_type {
+                self.visit_type_annotation(function_return_type, context);
+                context.type_validation.get_node_type(function_return_type).clone()
+            } else {
+                Type::void()
+            }
+        };
+
+        let function_type = BuiltinType::Function(Box::new(
+            FunctionType {
+                arguments: function.arguments.iter().map(|arg| {
+                    self.visit_typed_declaration(arg, context);
+                    let arg_type = context.type_validation.get_node_type(arg);
+
+                    arg_type.ttype.clone()
+                }).collect(),
+                return_type: function_return_type.ttype.clone(),
+            }
+        ));
+
+        context.type_validation.set_node_type(
+            fn_statement,
+            Type::new(
+                function_type,
+                false
+            )
+        );
+
+        self.visit_all_statements(&function.body, context);
+    }
+
+    fn visit_method_statement(&self, fn_statement: &FnStatement, method: &Method, context: &mut SecondSemanticsPassContext) {
+        let function_return_type = if let Some(function_return_type) = &method.return_type {
+            self.visit_type_annotation(function_return_type, context);
+
+            context.type_validation.get_node_type(function_return_type).clone()
+        } else {
+            Type::void()
+        };
+
+        let mut arguments = vec![];
+        let method_scope = context
+            .name_scoping
+            .local_scopes
+            .get_reverse_scope_index(fn_statement)
+            .unwrap();
+        let impl_block_id = context
+            .flow_control
+            .node_to_impl_block
+            .get(&fn_statement.get_node_id())
+            .unwrap();
+        let impl_block = context
+            .name_scoping
+            .local_scopes
+            .get_impl_block(*method_scope, impl_block_id)
+            .unwrap();
+        let struct_type = context
+            .type_validation
+            .get_struct_type(
+                &impl_block.struct_ast_node_index
+            );
+
+        arguments.push(
+            BuiltinType::Pointer(Box::new(PointerType::new(
+                BuiltinType::Struct(Box::new(
+                    struct_type.clone(),
+                )),
+                true
+            ))),
+        );
+
+        let other_arguments: Vec<_> = method.arguments.iter().map(|arg| {
+            self.visit_typed_declaration(arg, context);
+            let arg_type = context.type_validation.get_node_type(arg);
+
+            arg_type.ttype.clone()
+        }).collect();
+        arguments.extend(other_arguments);
+
+        context.type_validation.set_node_type(
+            fn_statement,
+            Type::new(
+                BuiltinType::Function(Box::new(
+                    FunctionType {
+                        arguments: arguments,
+                        return_type: function_return_type.ttype.clone(),
+                    }
+                )),
+                false
+            )
+        );
+
+        self.visit_all_statements(&method.body, context);
+    }
+
+    fn visit_struct_statement(
+        &self,
+        struct_statement: &StructStatement,
+        context: &mut SecondSemanticsPassContext
+    ) {
+        let struct_type = StructType {
+            ast_node_index: struct_statement.get_node_id(),
+            name: struct_statement.name.lexeme.clone(),
+            fields: HashMap::with_capacity(struct_statement.fields.len()),
+        };
+
+        context.type_validation.set_node_type(
+            struct_statement,
+            Type::new(
+                BuiltinType::Struct(Box::new(struct_type)),
+                false,
+            )
+        );
+
+        let typed_fields: HashMap<_, _> = struct_statement.fields.iter()
+            .map(
+                |fd| {
+                    self.visit_typed_declaration(fd, context);
+
+                    (
+                        fd.name.lexeme.clone(),
+                        context.type_validation.get_node_type(&fd.declared_type).clone()
+                    )
+                }
+            )
+            .collect();
+
+        let struct_type = context.type_validation.get_struct_type_mut(&struct_statement.node_id);
+
+        struct_type.fields.extend(typed_fields);
+    }
+
+    fn visit_type_annotation(
+        &self,
+        type_annotation: &TypeAnnotation,
+        context: &mut SecondSemanticsPassContext
+    ) {
+        let mut annotated_type = context.type_validation.type_from_type_annotation(
+            type_annotation, context
+        );
+
+        annotated_type.mutable = type_annotation.is_mut;
+        context.type_validation.set_node_type(
+            type_annotation,
+            annotated_type
+        );
+    }
+
+    fn visit_typed_declaration(
+        &self,
+        type_declaration: &TypedDeclaration,
+        context: &mut SecondSemanticsPassContext
+    ) {
+        self.visit_typed_declaration_default(type_declaration, context);
+
+        context.type_validation.set_node_type(
+            type_declaration,
+            context.type_validation.get_node_type(
+                &type_declaration.declared_type
+            ).clone()
+        );
+    }
+}
+
 impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
+    fn visit_function_statement(&self, fn_statement: &FnStatement, function: &Function, context: &mut SecondSemanticsPassContext) {
+        self.visit_function_statement_default(fn_statement, function, context);
+
+        let function_type = context.type_validation.get_function_type(
+            fn_statement
+        ).unwrap();
+
+        let return_types: Vec<_> = context
+            .flow_control
+            .function_return_statements
+            .get(&fn_statement.get_node_id())
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|return_statement_node_id| {
+                let return_statement = context.parser.get_return_statement(
+                    *return_statement_node_id,
+                ).unwrap();
+
+                if let Some(return_expr) = &return_statement.expression {
+                    context.type_validation.get_node_type(return_expr.as_ref()).clone()
+                } else {
+                    Type::void()
+                }
+            })
+            .collect();
+
+        if function.return_type.is_some() && return_types.is_empty() {
+            panic!("{} Function body doesn't have return statement {:?}", function.name, function)
+        }
+
+        for return_type in return_types.iter() {
+            if function.return_type.is_none() && return_type.ttype != BuiltinType::Void {
+                panic!(
+                    "void function {} can't have return statements with expression {}",
+                    function.name, return_type
+                );
+            } else if !function_type.return_type.inner_type_eq(&return_type.ttype) {
+                panic!(
+                    "incompatible return type for function {}: function return type {}, but got {}",
+                    function.name, function_type.return_type, return_type
+                );
+            }
+        }
+    }
+
+    fn visit_method_statement(&self, fn_statement: &FnStatement, method: &Method, context: &mut SecondSemanticsPassContext) {
+        self.visit_method_statement_default(fn_statement, method, context);
+
+        let function_type = context.type_validation.get_function_type(
+            fn_statement
+        ).unwrap();
+
+        let return_types: Vec<_> = context
+            .flow_control
+            .function_return_statements
+            .get(&fn_statement.get_node_id())
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|return_statement_node_id| {
+                let return_statement = context.parser.get_return_statement(
+                    *return_statement_node_id,
+                ).unwrap();
+
+                if let Some(return_expr) = &return_statement.expression {
+                    context.type_validation.get_node_type(return_expr.as_ref()).clone()
+                } else {
+                    Type::void()
+                }
+            })
+            .collect();
+
+        if method.return_type.is_some() && return_types.is_empty() {
+            panic!("{} method body doesn't have return statement {:?}", method.name, method)
+        }
+
+        for return_type in return_types.iter() {
+            if method.return_type.is_none() && return_type.ttype != BuiltinType::Void {
+                panic!(
+                    "void function {} can't have return statements with expression {}",
+                    method.name, return_type
+                );
+            } else if !function_type.return_type.inner_type_eq(&return_type.ttype) {
+                panic!(
+                    "incompatible return type for function {}: function return type {}, but got {}",
+                    method.name, function_type.return_type, return_type
+                );
+            }
+        }
+    }
+
     fn visit_let_statement(
         &self,
         let_statement: &LetStatement,
@@ -285,211 +571,8 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
         );
     }
 
-    fn visit_function_statement(
-        &self,
-        fn_statement: &FnStatement,
-        function: &Function,
-        context: &mut SecondSemanticsPassContext
-    ) {
-        self.visit_function_statement_default(fn_statement, function, context);
-
-        let function_return_type = {
-            if let Some(function_return_type) = &function.return_type {
-                context.type_validation.get_node_type(function_return_type)
-            } else {
-                &Type::void()
-            }
-        };
-
-        let return_types: Vec<_> = context
-            .flow_control
-            .function_return_statements
-            .get(&fn_statement.get_node_id())
-            .unwrap_or(&vec![])
-            .iter()
-            .map(|return_statement_node_id| {
-                let return_statement = context.parser.get_return_statement(
-                    *return_statement_node_id,
-                ).unwrap();
-
-                if let Some(return_expr) = &return_statement.expression {
-                    context.type_validation.get_node_type(return_expr.as_ref()).clone()
-                } else {
-                    Type::void()
-                }
-            })
-            .collect();
-
-        if function.return_type.is_some() && return_types.is_empty() {
-            panic!("{} Function body doesn't have return statement {:?}", function.name, function)
-        }
-
-        for return_type in return_types.iter() {
-            if function.return_type.is_none() && return_type.ttype != BuiltinType::Void {
-                panic!(
-                    "void function {} can't have return statements with expression {}",
-                    function.name, return_type
-                );
-            } else if !function_return_type.inner_type_eq(&return_type) {
-                panic!(
-                    "incompatible return type for function {}: function return type {}, but got {}",
-                    function.name, function_return_type, return_type
-                );
-            }
-        }
-
-        context.type_validation.set_node_type(
-            fn_statement,
-            Type::new(
-                BuiltinType::Function(Box::new(
-                    FunctionType {
-                        arguments: function.arguments.iter().map(|arg| {
-                            let arg_type = context.type_validation.get_node_type(arg);
-
-                            arg_type.ttype.clone()
-                        }).collect(),
-                        return_type: function_return_type.ttype.clone(),
-                    }
-                )),
-                false
-            )
-        );
-    }
-
-    fn visit_method_statement(&self, fn_statement: &FnStatement, method: &Method, context: &mut SecondSemanticsPassContext) {
-        self.visit_method_statement_default(fn_statement, method, context);
-
-        let function_return_type = {
-            if let Some(function_return_type) = &method.return_type {
-                context.type_validation.get_node_type(function_return_type)
-            } else {
-                &Type::void()
-            }
-        };
-        
-
-        let return_types: Vec<_> = context
-            .flow_control
-            .function_return_statements
-            .get(&fn_statement.get_node_id())
-            .unwrap_or(&vec![])
-            .iter()
-            .map(|return_statement_node_id| {
-                let return_statement = context.parser.get_return_statement(
-                    *return_statement_node_id,
-                ).unwrap();
-
-                if let Some(return_expr) = &return_statement.expression {
-                    context.type_validation.get_node_type(return_expr.as_ref()).clone()
-                } else {
-                    Type::void()
-                }
-            })
-            .collect();
-
-        if method.return_type.is_some() && return_types.is_empty() {
-            panic!("{} method body doesn't have return statement {:?}", method.name, method)
-        }
-
-        for return_type in return_types.iter() {
-            if method.return_type.is_none() && return_type.ttype != BuiltinType::Void {
-                panic!(
-                    "void function {} can't have return statements with expression {}",
-                    method.name, return_type
-                );
-            } else if !function_return_type.inner_type_eq(&return_type) {
-                panic!(
-                    "incompatible return type for function {}: function return type {}, but got {}",
-                    method.name, function_return_type, return_type
-                );
-            }
-        }
-        let mut arguments = vec![];
-        let method_scope = context
-            .name_scoping
-            .local_scopes
-            .get_reverse_scope_index(fn_statement)
-            .unwrap();
-        let impl_block_id = context
-            .flow_control
-            .node_to_impl_block
-            .get(&fn_statement.get_node_id())
-            .unwrap();
-        let impl_block = context
-            .name_scoping
-            .local_scopes
-            .get_impl_block(*method_scope, impl_block_id)
-            .unwrap();
-        let struct_type = context
-            .type_validation
-            .get_struct_type(
-                &impl_block.struct_ast_node_index
-            );
-
-        arguments.push(
-            BuiltinType::Pointer(Box::new(PointerType::new(
-                BuiltinType::Struct(Box::new(
-                    struct_type.clone(),
-                )),
-                true
-            ))),
-        );
-
-        let other_arguments: Vec<_> = method.arguments.iter().map(|arg| {
-            let arg_type = context.type_validation.get_node_type(arg);
-
-            arg_type.ttype.clone()
-        }).collect();
-        arguments.extend(other_arguments);
-
-        context.type_validation.set_node_type(
-            fn_statement,
-            Type::new(
-                BuiltinType::Function(Box::new(
-                    FunctionType {
-                        arguments: arguments,
-                        return_type: function_return_type.ttype.clone(),
-                    }
-                )),
-                false
-            )
-        );
-    }
-    
-    fn visit_struct_statement(
-        &self,
-        struct_statement: &StructStatement,
-        context: &mut SecondSemanticsPassContext
-    ) {
-        let struct_type = StructType {
-            ast_node_index: struct_statement.get_node_id(),
-            name: struct_statement.name.lexeme.clone(),
-            fields: HashMap::with_capacity(struct_statement.fields.len()),
-        };
-
-        context.type_validation.set_node_type(
-            struct_statement,
-            Type::new(
-                BuiltinType::Struct(Box::new(struct_type)),
-                false,
-            )
-        );
-        
-
-        self.visit_struct_statement_default(struct_statement, context);
-
-        let typed_fields: HashMap<_, _> = struct_statement.fields.iter()
-            .map(
-                |fd| (
-                    fd.name.lexeme.clone(),
-                    context.type_validation.get_node_type(&fd.declared_type).clone()
-                )
-            )
-            .collect();
-        
-        let struct_type = context.type_validation.get_struct_type_mut(&struct_statement.node_id);
-        
-        struct_type.fields.extend(typed_fields);
+    fn visit_impl_statement(&self, impl_statement: &ImplStatement, context: &mut SecondSemanticsPassContext) {
+        self.visit_impl_statement_default(impl_statement, context);
     }
 
     fn visit_grouping(&self, grouping: &Grouping, context: &mut SecondSemanticsPassContext) {
@@ -556,7 +639,28 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
             );
         };
 
-        let mut field_type = struct_type.fields[&dot_access.name.lexeme].clone();
+        let Some(mut field_type) = struct_type.fields.get(&dot_access.name.lexeme)
+            .cloned()
+            .or_else(|| {
+                let scope_index = context.name_scoping.local_scopes.get_reverse_scope_index(
+                    dot_access
+                ).unwrap();
+
+                let impl_block= context.name_scoping.local_scopes.find_in_impl_blocks(
+                    *scope_index, &dot_access.name.literal, struct_type.ast_node_index
+                )?;
+
+                let method = impl_block.methods[&dot_access.name.literal];
+
+                Some(context.type_validation.get_node_type(&method).clone())
+            })
+        else {
+            panic!(
+                "Couldn't find {} name in struct {}",
+                dot_access.name, struct_type
+            )
+        };
+
         field_type.mutable = object.mutable;
 
         // TODO: find from fields, then from all impl blocks
@@ -576,7 +680,6 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
             arrow_access.pointer.as_ref()
         );
 
-
         let BuiltinType::Pointer(pointer) = &pointer_object.ttype
         else {
             panic!(
@@ -591,7 +694,29 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
                 arrow_access.name, pointer.inner_type
             );
         };
-        let mut field_type = struct_type.fields[&arrow_access.name.lexeme].clone();
+
+        let Some(mut field_type) = struct_type.fields.get(&arrow_access.name.lexeme)
+            .cloned()
+            .or_else(|| {
+                let scope_index = context.name_scoping.local_scopes.get_reverse_scope_index(
+                    arrow_access
+                ).unwrap();
+
+                let impl_block= context.name_scoping.local_scopes.find_in_impl_blocks(
+                    *scope_index, &arrow_access.name.literal, struct_type.ast_node_index
+                )?;
+
+                let method = impl_block.methods[&arrow_access.name.literal];
+
+                Some(context.type_validation.get_node_type(&method).clone())
+            })
+        else {
+            panic!(
+                "Couldn't find {} name in struct {}",
+                arrow_access.name, struct_type
+            )
+        };
+
         field_type.mutable = pointer.mutable;
 
         context.type_validation.set_node_type(
@@ -602,8 +727,31 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
 
     fn visit_call(&self, call: &Call, context: &mut SecondSemanticsPassContext) {
         self.visit_call_default(call, context);
-        let callee_type = context.type_validation.get_node_type(call.callee.as_ref());
 
+        let mut arguments_types = vec![];
+        match call.callee.as_ref() {
+            Expression::DotAccess(dot_access) => {
+                arguments_types.push(
+                    Type::new_pointer(
+                        context.type_validation.get_node_type(
+                            dot_access.object.as_ref()
+                        ).clone(),
+                        true,
+                        false
+                    ),
+                );
+            },
+            Expression::ArrowAccess(arrow_access) => {
+                arguments_types.push(
+                    context.type_validation.get_node_type(
+                        arrow_access.pointer.as_ref()
+                    ).clone()
+                );
+            },
+            _ => {}
+        };
+
+        let callee_type = context.type_validation.get_node_type(call.callee.as_ref());
         let BuiltinType::Function(callee_function_type) = &callee_type.ttype
         else {
             panic!(
@@ -611,18 +759,21 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
                 callee_type, call.token
             );
         };
+        let mut passed_arguments_types: Vec<_> = call.arguments
+            .clone()
+            .iter()
+            .map(|arg|context.type_validation.get_node_type(arg).clone())
+            .collect();
+        arguments_types.append(&mut passed_arguments_types);
 
-        if callee_function_type.arguments.len() != call.arguments.len() {
+        if callee_function_type.arguments.len() != arguments_types.len() {
             panic!(
-                "function call expects {} parameters, but got {}",
+                "{} function call expects {} parameters, but got {}",
+                call.token,
                 callee_function_type.arguments.len(), call.arguments.len()
             );
         }
-        let arguments_types: Vec<_> = call.arguments
-            .clone()
-            .iter()
-            .map(|arg|context.type_validation.get_node_type(arg))
-            .collect();
+
         let mut args_mapping = callee_function_type
             .arguments
             .iter()
@@ -633,6 +784,11 @@ impl Semantics<SecondSemanticsPassContext> for TypeValidationSemantics {
                 callee_function_type.arguments, arguments_types
             );
         }
+
+        context.type_validation.set_node_type(
+            call,
+            Type::new(callee_function_type.return_type.clone(), false)
+        );
     }
 
     fn visit_unary(&self, unary: &Unary, context: &mut SecondSemanticsPassContext) {

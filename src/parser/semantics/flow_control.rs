@@ -287,6 +287,7 @@ impl Semantics<FirstSemanticsPassContext> for FlowControlSemantics {
             .or_default()
             .push(return_statement.node_id);
         
+        self.visit_return_statement_default(return_statement, context);
         // TODO: mark a function ref in context
         // if return_statement.expression.is_none() && true {
         //     panic!("return statement without expression in non-unit function")

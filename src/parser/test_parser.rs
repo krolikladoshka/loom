@@ -4,7 +4,7 @@ use crate::syntax::ast::Statement;
 use crate::syntax::ast::*;
 use crate::syntax::tokens::*;
 use crate::syntax::traits::PartialTreeEq;
-use crate::typing::type_validation::TypeValidationSemantics;
+use crate::typing::type_validation::{TypeValidationSemantics, TypeValidationSemanticsFirstPass};
 use crate::utils::test_utils::*;
 use crate::*;
 use rstest::*;
@@ -465,8 +465,10 @@ pub fn test_semantics(#[case] source_code: &'static str) {
     let semantic_analyzer = SemanticsAnalyzer::new(&statements)
         .with_semantics::<FlowControlSemantics>()
         .with_semantics::<NameScopingSemantics>();
-    let second_semantic_analyzer = SemanticsAnalyzer::new(&statements)
+    let second_semantic_analyzer_type_prepass = SemanticsAnalyzer::new(&statements)
         .with_semantics::<ScopeResolvingSemantics>()
+        .with_semantics::<TypeValidationSemanticsFirstPass>();
+    let second_semantic_analyzer = SemanticsAnalyzer::new(&statements)
         .with_semantics::<TypeValidationSemantics>();
     // let second_pass_analyzer = SemanticsAnalyzer::new(&statements)
     //     .with(name_resolving_semanti);
@@ -474,6 +476,7 @@ pub fn test_semantics(#[case] source_code: &'static str) {
     let ast_context = ParserContext::default()
         .analyze_by(flatten_tree_analyzer)
         .then_analyze_by(semantic_analyzer)
+        .then_analyze_by(second_semantic_analyzer_type_prepass)
         .then_analyze_by(second_semantic_analyzer)
         .then_analyze_by(
             SemanticsAnalyzer::new(&statements)
